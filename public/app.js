@@ -5,6 +5,7 @@ let lastData = null;
 let dbHistory = null;
 let dbPerformance = null;
 let historyFilter = 'ALL';
+let loading = false;
 
 async function api(path, options) {
   const r = await fetch(path, options);
@@ -114,7 +115,19 @@ function render(data) {
   $('health').textContent = 'ONLINE'; $('health').className = 'pill ok';
   $('symbol').textContent = data.symbol;
   $('price').textContent = data.livePrice == null ? (data.timeframes.M1.price == null ? '—' : fmt(data.timeframes.M1.price)) : fmt(data.livePrice);
-  $('allTrades').textContent = data.combined.confirmedEntries ?? data.combined.totalTrades ?? 0;
+
+  // Persistent statistics have one source of truth: PostgreSQL (/api/performance).
+  // Do not overwrite them every 3 seconds with the in-memory engine snapshot.
+  if (!dbPerformance) {
+    $('allTrades').textContent = data.combined.confirmedEntries ?? data.combined.totalTrades ?? 0;
+    const overall = data.combined.overall || { wins:0, losses:0, resolved:0, winrate:0 };
+    $('overallWinrate').textContent = `${Number(overall.winrate || 0).toFixed(1)}%`;
+    $('overallRecord').textContent = `${overall.wins || 0}W / ${overall.losses || 0}L`;
+    $('overallWins').textContent = overall.wins || 0;
+    $('overallLosses').textContent = overall.losses || 0;
+    $('overallResolved').textContent = overall.resolved || 0;
+  }
+
   $('allLive').textContent = data.combined.liveTrades;
   $('allPending').textContent = data.combined.pending;
   $('allSkipped').textContent = data.combined.skipped;
@@ -127,13 +140,6 @@ function render(data) {
     ? `${mt5.symbol || data.symbol} • Bid ${fmt(mt5.bid)} / Ask ${fmt(mt5.ask)} • ${timeText(mt5.lastSeen)}`
     : (mt5.lastSeen ? `Last seen ${timeText(mt5.lastSeen)}` : 'Menunggu heartbeat dari MT5');
 
-  const overall = data.combined.overall || { wins:0, losses:0, resolved:0, winrate:0 };
-  $('overallWinrate').textContent = `${Number(overall.winrate || 0).toFixed(1)}%`;
-  $('overallRecord').textContent = `${overall.wins || 0}W / ${overall.losses || 0}L`;
-  $('overallWins').textContent = overall.wins || 0;
-  $('overallLosses').textContent = overall.losses || 0;
-  $('overallResolved').textContent = overall.resolved || 0;
-
   const s = data.lastSignal;
   $('signalBox').className = 'signal ' + (s ? (s.dir === 'buy' ? 'buy' : 'sell') : 'neutral');
   $('signal').textContent = s ? `${s.timeframe} ${s.dir.toUpperCase()} @ ${fmt(s.entry)}` : 'WAITING';
@@ -142,9 +148,11 @@ function render(data) {
   $('tfGrid').innerHTML = tfs.map(tf => {
     const d = data.timeframes[tf];
     const sig = d.lastSignal;
+    const persisted = persistentStatsForTf(tf);
+    const entryCount = persisted?.confirmedEntries ?? d.stats.confirmedEntries ?? d.stats.total ?? 0;
     return `<article class="tf-card">
       <div class="tf-title"><b>${tf}</b><span>${d.price == null ? '—' : fmt(d.price)}</span></div>
-      <div class="tf-metrics"><div><small>Fresh OB</small><strong>${d.freshOB.length}</strong></div><div><small>Fresh FVG</small><strong>${d.freshFVG.length}</strong></div><div><small>Pending</small><strong>${d.pending.length}</strong></div><div><small>Entry</small><strong>${d.stats.confirmedEntries ?? d.stats.total ?? 0}</strong></div></div>
+      <div class="tf-metrics"><div><small>Fresh OB</small><strong>${d.freshOB.length}</strong></div><div><small>Fresh FVG</small><strong>${d.freshFVG.length}</strong></div><div><small>Pending</small><strong>${d.pending.length}</strong></div><div><small>Entry</small><strong>${entryCount}</strong></div></div>
       <div class="tf-signal ${sig ? (sig.dir==='buy'?'buy':'sell') : ''}">${sig ? `${sig.dir.toUpperCase()} ${fmt(sig.entry)}` : 'WAITING'}</div>
     </article>`;
   }).join('');
@@ -161,18 +169,40 @@ function render(data) {
 }
 
 async function load() {
+  if (loading) return;
+  loading = true;
   try {
-    const data = await api('/api/status');
-    render(data);
-    const [perf, hist] = await Promise.all([
+    // Fetch one refresh cycle together so memory and database responses cannot race
+    // and make persistent statistics jump backward/forward on screen.
+    const [data, perf, hist] = await Promise.all([
+      api('/api/status'),
       api('/api/performance').catch(e => { console.error('performance', e); return null; }),
       api('/api/history?limit=2000').catch(e => { console.error('history', e); return null; })
     ]);
-    if (perf) renderPerformance(perf);
-    else { dbPerformance = null; $('dbStatus').textContent = 'DATABASE OFFLINE'; $('dbStatus').className = 'status-bad'; }
-    if (hist?.history) { dbHistory = hist.history; renderHistory(); renderWinrateByTf(); }
+
+    if (perf) dbPerformance = perf;
+    if (hist?.history) dbHistory = hist.history;
+
+    render(data);
+
+    if (perf) {
+      renderPerformance(perf);
+    } else if (!dbPerformance) {
+      $('dbStatus').textContent = 'DATABASE OFFLINE';
+      $('dbStatus').className = 'status-bad';
+    } else {
+      $('dbStatus').textContent = 'DATABASE RECONNECTING • LAST DATA';
+      $('dbStatus').className = 'status-bad';
+    }
+
+    if (hist?.history) {
+      renderHistory();
+      renderWinrateByTf();
+    }
   } catch(e) {
     $('health').textContent='OFFLINE'; $('health').className='pill'; console.error(e);
+  } finally {
+    loading = false;
   }
 }
 
