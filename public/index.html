@@ -57,6 +57,25 @@
         <div class="overall-metric"><span>WIN (TP1+)</span><strong id="overallWins">0</strong></div>
         <div class="overall-metric"><span>LOSS (SL sebelum TP1)</span><strong id="overallLosses">0</strong></div>
         <div class="overall-metric"><span>RESOLVED</span><strong id="overallResolved">0</strong></div>
+        <div class="overall-metric"><span>PROFIT FACTOR</span><strong id="overallProfitFactor">0.00</strong></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="section-head"><div><h2>Statistik Daily / Weekly / Monthly</h2><p>Data dari database. Net P/L pips mengikuti hasil utama: TP1 = +1R, SL sebelum TP1 = -1R. Zona waktu Asia/Jakarta.</p></div><small id="dbStatus" class="muted">DATABASE —</small></div>
+      <div class="period-grid">
+        <article class="period-card">
+          <div class="period-title"><span>DAILY</span><strong id="dailySignals">0 sinyal</strong></div>
+          <div class="period-stats"><div><small>Winrate</small><b id="dailyWinrate">0.0%</b></div><div><small>W / L</small><b id="dailyRecord">0W / 0L</b></div><div><small>Net P/L</small><b id="dailyNet">0.0 pips</b></div></div>
+        </article>
+        <article class="period-card">
+          <div class="period-title"><span>WEEKLY</span><strong id="weeklySignals">0 sinyal</strong></div>
+          <div class="period-stats"><div><small>Winrate</small><b id="weeklyWinrate">0.0%</b></div><div><small>W / L</small><b id="weeklyRecord">0W / 0L</b></div><div><small>Net P/L</small><b id="weeklyNet">0.0 pips</b></div></div>
+        </article>
+        <article class="period-card">
+          <div class="period-title"><span>MONTHLY</span><strong id="monthlySignals">0 sinyal</strong></div>
+          <div class="period-stats"><div><small>Winrate</small><b id="monthlyWinrate">0.0%</b></div><div><small>W / L</small><b id="monthlyRecord">0W / 0L</b></div><div><small>Net P/L</small><b id="monthlyNet">0.0 pips</b></div></div>
+        </article>
       </div>
     </section>
 
@@ -77,7 +96,7 @@
 
     <section class="card">
       <div class="section-head">
-        <div><h2>Historical Entry</h2><p>Hanya setup yang benar-benar menyentuh harga Entry yang masuk historical.</p></div>
+        <div><h2>Historical Entry</h2><p>Hanya setup yang benar-benar menyentuh harga Entry yang masuk historical. Historical dibaca dari database agar tidak hilang saat restart/redeploy.</p></div>
         <div class="tabs" id="historyTabs"><button data-tf="ALL" class="active">ALL</button><button data-tf="M1">M1</button><button data-tf="M3">M3</button><button data-tf="M5">M5</button></div>
       </div>
       <div class="table-wrap"><table><thead><tr><th>TF</th><th>Waktu</th><th>Side</th><th>Entry</th><th>SL</th><th>SL pips</th><th>TP1</th><th>TP2</th><th>TP3</th><th>TP4</th><th>Hasil</th></tr></thead><tbody id="history"></tbody></table></div>
