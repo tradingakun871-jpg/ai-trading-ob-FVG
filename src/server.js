@@ -2,6 +2,7 @@ import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { StrategyEngine, defaultConfig } from './strategy.js';
+import { initDatabase, syncEngineToDatabase, getPerformance, getHistoricalEntries, databaseEnabled } from './database.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -28,6 +29,30 @@ const mt5 = {
 
 app.use(express.json({ limit:'4mb' }));
 app.use(express.static(path.join(__dirname, '..', 'public')));
+
+let dbReady = false;
+try {
+  dbReady = await initDatabase();
+  if (dbReady) console.log('Trading database initialized');
+  else console.warn('Trading database disabled: DATABASE_URL not configured');
+} catch (e) {
+  console.error('Trading database init failed:', e.message);
+}
+
+let dbSyncTimer = null;
+async function syncAllToDatabase() {
+  if (!dbReady || !databaseEnabled()) return false;
+  await Promise.all(TFS.map(tf => syncEngineToDatabase(tf, engines[tf])));
+  return true;
+}
+function scheduleDbSync() {
+  if (!dbReady || !databaseEnabled()) return;
+  if (dbSyncTimer) clearTimeout(dbSyncTimer);
+  dbSyncTimer = setTimeout(() => {
+    dbSyncTimer = null;
+    syncAllToDatabase().catch(e => console.error('Database sync failed:', e.message));
+  }, 300);
+}
 
 const normTf = (v) => {
   const s = String(v || 'M1').toUpperCase().replace('MIN','M');
@@ -226,6 +251,7 @@ function combinedSnapshot() {
     timeframes,
     lastSignal: signals[0] || null,
     history: histories,
+    database: { configured:databaseEnabled(), ready:dbReady },
     integrations: {
       mt5: {
         connected:mt5Connected(),
@@ -265,10 +291,26 @@ app.get('/api/health', (_req,res) => res.json({
   timeframes:TFS,
   mt5Connected:mt5Connected(),
   telegramConfigured:telegramReady(),
+  databaseConfigured:databaseEnabled(),
+  databaseReady:dbReady,
   time:new Date().toISOString()
 }));
 app.get('/api/status', (_req,res) => res.json(combinedSnapshot()));
 app.get('/api/integrations', (_req,res) => res.json(combinedSnapshot().integrations));
+app.get('/api/performance', async (_req,res) => {
+  try {
+    if (!dbReady) return res.status(503).json({ error:'database not ready' });
+    res.json(await getPerformance());
+  } catch(e) { res.status(500).json({ error:e.message }); }
+});
+app.get('/api/history', async (req,res) => {
+  try {
+    if (!dbReady) return res.status(503).json({ error:'database not ready' });
+    const timeframe = req.query.timeframe ? normTf(req.query.timeframe) : null;
+    const history = await getHistoricalEntries({ timeframe, limit:req.query.limit || 500 });
+    res.json({ history, database:true });
+  } catch(e) { res.status(400).json({ error:e.message }); }
+});
 app.get('/api/status/:tf', (req,res) => {
   try { res.json(engines[normTf(req.params.tf)].snapshot()); }
   catch(e) { res.status(400).json({ error:e.message }); }
@@ -302,6 +344,7 @@ app.post('/api/candle', (req,res) => {
     const candle = body.candle || body;
     const tf = body.timeframe || candle.timeframe || 'M1';
     ingestOne(tf, candle, body.autoAggregate !== false, body.notify === true);
+    scheduleDbSync();
     res.json(combinedSnapshot());
   } catch(e) { res.status(400).json({ error:e.message }); }
 });
@@ -312,6 +355,7 @@ app.post('/api/candles', (req,res) => {
     if (!Array.isArray(candles)) return res.status(400).json({ error:'candles array required' });
     const defaultTf = body.timeframe || 'M1';
     for (const c of candles) ingestOne(c.timeframe || defaultTf, c.candle || c, body.autoAggregate !== false, body.notify === true);
+    scheduleDbSync();
     res.json(combinedSnapshot());
   } catch(e) { res.status(400).json({ error:e.message }); }
 });
@@ -319,24 +363,26 @@ app.post('/api/reset', (req,res) => {
   try {
     if (req.body?.timeframe) engines[normTf(req.body.timeframe)].reset();
     else { TFS.forEach(tf => engines[tf].reset()); rollups.M3 = null; rollups.M5 = null; }
-    res.json({ ok:true, status:combinedSnapshot() });
+    res.json({ ok:true, status:combinedSnapshot(), databasePreserved:true });
   } catch(e) { res.status(400).json({ error:e.message }); }
 });
 
-app.post('/api/mt5/backfill', (req,res) => {
+app.post('/api/mt5/backfill', async (req,res) => {
   if (!requireBridge(req,res)) return;
   try {
     const body = req.body || {};
     const candles = body.candles;
     if (!Array.isArray(candles)) return res.status(400).json({ ok:false, error:'candles array required' });
     const tf = body.timeframe || 'M1';
+    if (normTf(tf) !== 'M1' && body.autoAggregate !== false) return res.status(400).json({ ok:false, error:'autoAggregate backfill must use M1 source only' });
     if (body.symbol) {
       mt5.symbol = body.symbol;
       TFS.forEach(x => engines[x].updateConfig({ symbol:body.symbol, timeframe:x }));
     }
     for (const c of candles) ingestOne(c.timeframe || tf, c, body.autoAggregate !== false, false);
     mt5.lastSeen = Date.now();
-    res.json({ ok:true, imported:candles.length, status:combinedSnapshot() });
+    await syncAllToDatabase();
+    res.json({ ok:true, imported:candles.length, databaseSynced:dbReady, status:combinedSnapshot() });
   } catch(e) { res.status(400).json({ ok:false, error:e.message }); }
 });
 
@@ -367,9 +413,18 @@ app.post('/api/mt5/webhook', (req,res) => {
     const candle = body.candle || body;
     mt5.lastCandle = normTime(candle.time ?? Date.now());
     ingestOne(tf, candle, body.autoAggregate !== false, true);
+    scheduleDbSync();
     const snap = combinedSnapshot();
     res.json({ ok:true, signal:snap.lastSignal, integrations:snap.integrations, status:snap });
   } catch(e) { res.status(400).json({ ok:false, error:e.message }); }
+});
+
+app.post('/api/telegram/test-ui', async (req,res) => {
+  if (!telegramReady()) return res.status(409).json({ ok:false, error:'Telegram is not configured on server.' });
+  const raw = String(req.body?.message || '✅ AI Trading OB+FVG Telegram privat test berhasil.').trim();
+  const message = raw.slice(0, 500);
+  const ok = await sendTelegram(message);
+  res.status(ok ? 200 : 502).json({ ok });
 });
 
 app.post('/api/telegram/test', async (req,res) => {
