@@ -11,7 +11,7 @@
     <div>
       <div class="eyebrow">AI SCALPING ENGINE</div>
       <h1>Order Block + FVG — M1 / M3 / M5</h1>
-      <p>Fresh OB + FVG • Swing SL maksimum 50 pips • TP1–TP4 = 1R–4R</p>
+      <p>Fresh OB + FVG • Swing SL + 5 pips buffer • Maksimum SL total 50 pips • TP1–TP4 = 1R–4R</p>
     </div>
     <div class="top-actions">
       <nav class="main-nav" aria-label="Menu utama">
@@ -20,6 +20,7 @@
           <button class="nav-trigger" type="button" aria-haspopup="true">Settings <span>▾</span></button>
           <div class="nav-submenu" role="menu">
             <a href="/settings.html" role="menuitem">Strategy Settings</a>
+            <a href="/telegram.html" role="menuitem">Telegram</a>
           </div>
         </div>
       </nav>
@@ -33,15 +34,9 @@
       <div id="signalBox" class="signal neutral"><span>LAST SIGNAL ALL TF</span><b id="signal">WAITING</b><small id="signalTime">Belum ada entry valid</small></div>
     </section>
 
-    <section class="columns integration-grid">
-      <article class="card integration-card">
-        <div><span class="muted">MT5 BRIDGE</span><strong id="mt5Status">OFFLINE</strong></div>
-        <small id="mt5Detail" class="muted">Menunggu heartbeat dari MT5</small>
-      </article>
-      <article class="card integration-card">
-        <div><span class="muted">TELEGRAM</span><strong id="telegramStatus">NOT CONFIGURED</strong></div>
-        <small id="telegramDetail" class="muted">Bot token dan chat ID belum aktif</small>
-      </article>
+    <section class="card integration-card">
+      <div><span class="muted">MT5 BRIDGE</span><strong id="mt5Status">OFFLINE</strong></div>
+      <small id="mt5Detail" class="muted">Menunggu heartbeat dari MT5</small>
     </section>
 
     <section class="stats-grid">
