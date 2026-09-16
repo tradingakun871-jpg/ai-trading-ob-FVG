@@ -34,11 +34,26 @@ function render(data) {
   lastData = data;
   $('health').textContent = 'ONLINE'; $('health').className = 'pill ok';
   $('symbol').textContent = data.symbol;
-  $('price').textContent = data.timeframes.M1.price == null ? '—' : fmt(data.timeframes.M1.price);
+  $('price').textContent = data.livePrice == null ? (data.timeframes.M1.price == null ? '—' : fmt(data.timeframes.M1.price)) : fmt(data.livePrice);
   $('allTrades').textContent = data.combined.confirmedEntries ?? data.combined.totalTrades ?? 0;
   $('allLive').textContent = data.combined.liveTrades;
   $('allPending').textContent = data.combined.pending;
   $('allSkipped').textContent = data.combined.skipped;
+
+  const integrations = data.integrations || {};
+  const mt5 = integrations.mt5 || {};
+  const tg = integrations.telegram || {};
+  $('mt5Status').textContent = mt5.connected ? 'CONNECTED' : 'OFFLINE';
+  $('mt5Status').className = mt5.connected ? 'status-ok' : 'status-bad';
+  $('mt5Detail').textContent = mt5.connected
+    ? `${mt5.symbol || data.symbol} • Bid ${fmt(mt5.bid)} / Ask ${fmt(mt5.ask)} • ${timeText(mt5.lastSeen)}`
+    : (mt5.lastSeen ? `Last seen ${timeText(mt5.lastSeen)}` : 'Menunggu heartbeat dari MT5');
+
+  $('telegramStatus').textContent = tg.configured ? 'READY' : 'NOT CONFIGURED';
+  $('telegramStatus').className = tg.configured ? 'status-ok' : 'status-warn';
+  $('telegramDetail').textContent = tg.configured
+    ? `Entry / TP / SL notifications active${tg.notifyPending ? ' • Pending ON' : ' • Pending OFF'}`
+    : 'TELEGRAM_BOT_TOKEN dan TELEGRAM_CHAT_ID belum dipasang';
 
   const overall = data.combined.overall || { wins:0, losses:0, resolved:0, winrate:0 };
   $('overallWinrate').textContent = `${Number(overall.winrate || 0).toFixed(1)}%`;
