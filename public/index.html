@@ -34,9 +34,9 @@
     </section>
 
     <section class="stats-grid">
-      <article class="card"><span>Total Trade</span><strong id="allTrades">0</strong></article>
+      <article class="card"><span>Entry Tereksekusi</span><strong id="allTrades">0</strong></article>
       <article class="card"><span>Live Trade</span><strong id="allLive">0</strong></article>
-      <article class="card"><span>Pending</span><strong id="allPending">0</strong></article>
+      <article class="card"><span>Setup Pending</span><strong id="allPending">0</strong></article>
       <article class="card"><span>Skipped SL &gt; 50</span><strong id="allSkipped">0</strong></article>
       <article class="card"><span>TF Aktif</span><strong>3</strong></article>
       <article class="card"><span>Mode</span><strong class="small-strong">SCALP</strong></article>
@@ -44,7 +44,7 @@
 
     <section class="card overall-card">
       <div class="section-head">
-        <div><h2>Winrate Keseluruhan M1 + M3 + M5</h2><p>TP1 tersentuh = WIN. SL sebelum TP1 = LOSS. Setup yang belum entry atau trade yang belum resolved tidak masuk perhitungan.</p></div>
+        <div><h2>Winrate Keseluruhan M1 + M3 + M5</h2><p>Hanya setup yang sudah menyentuh harga Entry yang dihitung. TP1 tersentuh = WIN. SL sebelum TP1 = LOSS. Pending/belum entry tidak masuk statistik.</p></div>
       </div>
       <div class="overall-grid">
         <div class="overall-primary"><span>OVERALL WINRATE</span><strong id="overallWinrate">0.0%</strong><small id="overallRecord">0W / 0L</small></div>
@@ -60,18 +60,18 @@
     </section>
 
     <section class="card">
-      <div class="section-head"><div><h2>Winrate Masing-masing TF</h2><p>TP1–TP4 dihitung terpisah untuk M1, M3 dan M5. Overall tiap TF menggunakan TP1 sebagai WIN.</p></div></div>
+      <div class="section-head"><div><h2>Winrate Masing-masing TF</h2><p>TP1–TP4 dihitung terpisah untuk M1, M3 dan M5. Setup yang belum hit Entry tidak masuk jumlah trade maupun winrate.</p></div></div>
       <div id="winrateByTf" class="winrate-tfs"></div>
     </section>
 
     <section class="columns">
-      <article class="card"><div class="section-head"><div><h2>Setup Aktif</h2><p>Pending OB + FVG per TF.</p></div></div><div id="setups" class="list"><div class="empty">Belum ada setup aktif.</div></div></article>
-      <article class="card"><div class="section-head"><div><h2>Live Position</h2><p>Posisi aktif M1/M3/M5.</p></div></div><div id="positions" class="list"><div class="empty">Belum ada posisi.</div></div></article>
+      <article class="card"><div class="section-head"><div><h2>Setup Aktif</h2><p>Pending OB + FVG per TF. Bagian ini belum dihitung sebagai trade.</p></div></div><div id="setups" class="list"><div class="empty">Belum ada setup aktif.</div></div></article>
+      <article class="card"><div class="section-head"><div><h2>Live Position</h2><p>Hanya posisi yang Entry-nya sudah tersentuh.</p></div></div><div id="positions" class="list"><div class="empty">Belum ada posisi.</div></div></article>
     </section>
 
     <section class="card">
       <div class="section-head">
-        <div><h2>Historical Entry</h2><p>Hanya trade yang benar-benar menyentuh harga Entry yang masuk historical.</p></div>
+        <div><h2>Historical Entry</h2><p>Hanya setup yang benar-benar menyentuh harga Entry yang masuk historical.</p></div>
         <div class="tabs" id="historyTabs"><button data-tf="ALL" class="active">ALL</button><button data-tf="M1">M1</button><button data-tf="M3">M3</button><button data-tf="M5">M5</button></div>
       </div>
       <div class="table-wrap"><table><thead><tr><th>TF</th><th>Waktu</th><th>Side</th><th>Entry</th><th>SL</th><th>SL pips</th><th>TP1</th><th>TP2</th><th>TP3</th><th>TP4</th><th>Hasil</th></tr></thead><tbody id="history"></tbody></table></div>
