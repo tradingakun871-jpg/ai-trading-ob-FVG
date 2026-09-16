@@ -13,7 +13,13 @@
       <h1>Order Block + FVG — M1 / M3 / M5</h1>
       <p>Fresh OB + FVG • Swing SL maksimum 50 pips • TP1–TP4 = 1R–4R</p>
     </div>
-    <div id="health" class="pill">CONNECTING</div>
+    <div class="top-actions">
+      <nav class="main-nav" aria-label="Menu utama">
+        <a class="active" href="/">Dashboard</a>
+        <a href="/settings.html">Strategy Settings</a>
+      </nav>
+      <div id="health" class="pill">CONNECTING</div>
+    </div>
   </header>
 
   <main class="layout">
@@ -44,18 +50,6 @@
     <section class="columns">
       <article class="card"><div class="section-head"><div><h2>Setup Aktif</h2><p>Pending OB + FVG per TF.</p></div></div><div id="setups" class="list"><div class="empty">Belum ada setup aktif.</div></div></article>
       <article class="card"><div class="section-head"><div><h2>Live Position</h2><p>Posisi aktif M1/M3/M5.</p></div></div><div id="positions" class="list"><div class="empty">Belum ada posisi.</div></div></article>
-    </section>
-
-    <section class="card">
-      <div class="section-head"><div><h2>Strategy Settings</h2><p>Setting ini diterapkan ke semua TF. M1 dapat otomatis membentuk candle M3 dan M5.</p></div><button id="saveConfig">Simpan</button></div>
-      <div class="form-grid">
-        <label>Symbol<input id="cfgSymbol" value="XAUUSD" /></label>
-        <label>1 Pip XAUUSD<input id="cfgPip" type="number" step="0.01" value="0.1" /></label>
-        <label>Max Swing SL (pips)<input id="cfgMaxSl" type="number" value="50" /></label>
-        <label>Entry FVG<select id="cfgEntry"><option value="first_touch">First Touch</option><option value="top">Atas FVG</option><option value="mid">Midpoint 50%</option><option value="bottom">Bawah FVG</option></select></label>
-        <label>Displacement ATR<input id="cfgDisp" type="number" step="0.1" value="1.5" /></label>
-        <label>RR Target<input value="1R / 2R / 3R / 4R" disabled /></label>
-      </div>
     </section>
 
     <section class="card">
