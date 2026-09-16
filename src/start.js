@@ -1,36 +1,29 @@
-const runTelegramTest = String(process.env.TELEGRAM_TEST_ON_BOOT || 'false').toLowerCase() === 'true';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-async function telegramBootTest() {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  const chatId = process.env.TELEGRAM_CHAT_ID;
-  if (!runTelegramTest) return;
-  if (!token || !chatId) {
-    console.log('TELEGRAM_BOOT_TEST', JSON.stringify({ ok:false, reason:'missing_config' }));
-    return;
-  }
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const serverPath = path.join(__dirname, 'server.js');
 
-  try {
-    const r = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method:'POST',
-      headers:{ 'Content-Type':'application/json' },
-      body:JSON.stringify({
-        chat_id:chatId,
-        text:'✅ TEST AI Trading OB+FVG\nTelegram test langsung dari Railway berhasil dijalankan.'
-      })
-    });
-    const body = await r.json().catch(() => ({}));
-    console.log('TELEGRAM_BOOT_TEST', JSON.stringify({
-      http:r.status,
-      ok:Boolean(body.ok),
-      error_code:body.error_code ?? null,
-      description:body.description ?? null,
-      message_id:body.result?.message_id ?? null,
-      chat_type:body.result?.chat?.type ?? null
-    }));
-  } catch (e) {
-    console.log('TELEGRAM_BOOT_TEST', JSON.stringify({ ok:false, reason:e.message }));
-  }
+// Keep MT5/bridge endpoints protected, but allow the website's Telegram test
+// button to send only to the private Chat ID already stored on Railway.
+// No Telegram token or Chat ID is ever returned to the browser.
+const marker = "app.post('/api/telegram/test', async (req,res) => {";
+const uiRoute = `app.post('/api/telegram/test-ui', async (req,res) => {
+  if (!telegramReady()) return res.status(409).json({ ok:false, error:'Telegram is not configured on server.' });
+  const raw = String(req.body?.message || '✅ AI Trading OB+FVG Telegram privat test berhasil.').trim();
+  const message = raw.slice(0, 500);
+  const ok = await sendTelegram(message);
+  res.status(ok ? 200 : 502).json({ ok });
+});
+
+`;
+
+let source = fs.readFileSync(serverPath, 'utf8');
+if (!source.includes("app.post('/api/telegram/test-ui'")) {
+  if (!source.includes(marker)) throw new Error('Telegram route marker not found');
+  source = source.replace(marker, uiRoute + marker);
+  fs.writeFileSync(serverPath, source, 'utf8');
 }
 
-await telegramBootTest();
 await import('./server.js');
