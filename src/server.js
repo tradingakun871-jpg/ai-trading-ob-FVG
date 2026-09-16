@@ -61,6 +61,12 @@ function combinedSnapshot() {
   const histories = TFS.flatMap(tf => timeframes[tf].history.map(x => ({ ...x, timeframe:tf })))
     .sort((a,b) => (b.openedTime || 0) - (a.openedTime || 0)).slice(0, 300);
   const signals = TFS.map(tf => timeframes[tf].lastSignal).filter(Boolean).sort((a,b) => (b.time||0)-(a.time||0));
+
+  const overallWins = TFS.reduce((n,tf)=>n + timeframes[tf].stats.primary.wins, 0);
+  const overallLosses = TFS.reduce((n,tf)=>n + timeframes[tf].stats.primary.losses, 0);
+  const overallResolved = overallWins + overallLosses;
+  const overallWinrate = overallResolved ? +(overallWins / overallResolved * 100).toFixed(1) : 0;
+
   return {
     symbol: engines.M1.config.symbol,
     strategy: 'Fresh OB + FVG | Swing SL Max 50 pips | TP 1R-4R',
@@ -72,6 +78,13 @@ function combinedSnapshot() {
       liveTrades: TFS.reduce((n,tf)=>n+timeframes[tf].stats.live,0),
       pending: TFS.reduce((n,tf)=>n+timeframes[tf].pending.length,0),
       skipped: TFS.reduce((n,tf)=>n+timeframes[tf].stats.skipped,0),
+      overall: {
+        wins: overallWins,
+        losses: overallLosses,
+        resolved: overallResolved,
+        winrate: overallWinrate,
+        rule: 'TP1 = WIN; SL sebelum TP1 = LOSS; belum entry / belum resolved tidak dihitung'
+      }
     }
   };
 }
@@ -99,9 +112,9 @@ app.post('/api/config', (req,res) => {
 app.get('/api/signals', (req,res) => {
   try {
     const tf = req.query.timeframe ? normTf(req.query.timeframe) : null;
-    if (tf) return res.json({ timeframe:tf, lastSignal:engines[tf].lastSignal, history:engines[tf].trades.slice(-100).reverse(), stats:engines[tf].stats() });
+    if (tf) return res.json({ timeframe:tf, lastSignal:engines[tf].lastSignal, history:engines[tf].snapshot().history, stats:engines[tf].stats() });
     const snap = combinedSnapshot();
-    res.json({ lastSignal:snap.lastSignal, history:snap.history, stats:Object.fromEntries(TFS.map(x=>[x,engines[x].stats()])) });
+    res.json({ lastSignal:snap.lastSignal, history:snap.history, overall:snap.combined.overall, stats:Object.fromEntries(TFS.map(x=>[x,engines[x].stats()])) });
   } catch(e) { res.status(400).json({ error:e.message }); }
 });
 
