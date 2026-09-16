@@ -21,11 +21,9 @@ async function loadStatus() {
     const ready = Boolean(tg.configured);
     $('tgStatus').textContent = ready ? 'READY' : 'NOT CONFIGURED';
     $('tgStatus').className = ready ? 'status-ok' : 'status-warn';
-    $('tgDetail').textContent = ready
-      ? 'Bot token dan Chat ID terdeteksi. ENTRY / TP / SL siap dikirim.'
-      : 'TELEGRAM_BOT_TOKEN atau TELEGRAM_CHAT_ID belum terpasang di Railway.';
+    $('tgDetail').textContent = ready ? 'Private Chat ID dan bot sudah tersimpan. ENTRY / TP / SL siap dikirim.' : 'Telegram belum dikonfigurasi di Railway.';
     $('pendingStatus').textContent = tg.notifyPending ? 'ON' : 'OFF';
-    $('telegramBadge').innerHTML = `<span>${ready ? 'READY' : 'SETUP'}</span>`;
+    $('telegramBadge').innerHTML = `<span>${ready ? 'PRIVATE READY' : 'SETUP'}</span>`;
     setHealth(true);
   } catch (e) {
     setHealth(false);
@@ -35,26 +33,21 @@ async function loadStatus() {
 }
 
 $('testTelegram').addEventListener('click', async () => {
-  const token = $('bridgeToken').value.trim();
   const message = $('testMessage').value.trim();
   const result = $('testResult');
-  if (!token) {
-    result.textContent = 'Bridge Token wajib diisi untuk test.';
-    return;
-  }
   const button = $('testTelegram');
   button.disabled = true;
   button.textContent = 'Mengirim...';
+  result.textContent = 'Mengirim test ke private Telegram...';
   try {
-    await api('/api/telegram/test', {
+    const response = await fetch('/api/telegram/test-ui', {
       method:'POST',
-      headers:{
-        'Content-Type':'application/json',
-        'X-Bridge-Token':token
-      },
-      body:JSON.stringify({ message: message || '✅ AI Trading OB+FVG Telegram test berhasil.' })
+      headers:{ 'Content-Type':'application/json' },
+      body:JSON.stringify({ message:message || '✅ AI Trading OB+FVG Telegram privat test berhasil.' })
     });
-    result.textContent = 'Test berhasil dikirim ke Telegram.';
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+    result.textContent = 'Test berhasil dikirim ke private Telegram.';
   } catch (e) {
     result.textContent = `Test gagal: ${e.message}`;
   } finally {
