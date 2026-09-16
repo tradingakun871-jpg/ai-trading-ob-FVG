@@ -64,20 +64,11 @@ async function load() {
   try { render(await api('/api/status')); }
   catch(e) { $('health').textContent='OFFLINE'; $('health').className='pill'; console.error(e); }
 }
-async function loadConfig() {
-  const c = (await api('/api/config')).shared;
-  $('cfgSymbol').value = c.symbol || 'XAUUSD'; $('cfgPip').value = c.pipSize; $('cfgMaxSl').value = c.maxSwingSlPips;
-  $('cfgEntry').value = c.fvgEntryMode; $('cfgDisp').value = c.displacementAtr;
-}
-$('saveConfig').addEventListener('click', async () => {
-  await api('/api/config', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
-    symbol:$('cfgSymbol').value.trim() || 'XAUUSD', pipSize:Number($('cfgPip').value), maxSwingSlPips:Number($('cfgMaxSl').value),
-    fvgEntryMode:$('cfgEntry').value, displacementAtr:Number($('cfgDisp').value)
-  })});
-  await load();
-});
+
 $('historyTabs').addEventListener('click', e => {
   const b = e.target.closest('button[data-tf]'); if (!b) return;
   historyFilter = b.dataset.tf; [...$('historyTabs').querySelectorAll('button')].forEach(x=>x.classList.toggle('active',x===b)); renderHistory();
 });
-loadConfig(); load(); setInterval(load, 3000);
+
+load();
+setInterval(load, 3000);
