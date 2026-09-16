@@ -42,13 +42,25 @@
       <article class="card"><span>Mode</span><strong class="small-strong">SCALP</strong></article>
     </section>
 
+    <section class="card overall-card">
+      <div class="section-head">
+        <div><h2>Winrate Keseluruhan M1 + M3 + M5</h2><p>TP1 tersentuh = WIN. SL sebelum TP1 = LOSS. Setup yang belum entry atau trade yang belum resolved tidak masuk perhitungan.</p></div>
+      </div>
+      <div class="overall-grid">
+        <div class="overall-primary"><span>OVERALL WINRATE</span><strong id="overallWinrate">0.0%</strong><small id="overallRecord">0W / 0L</small></div>
+        <div class="overall-metric"><span>WIN (TP1+)</span><strong id="overallWins">0</strong></div>
+        <div class="overall-metric"><span>LOSS (SL sebelum TP1)</span><strong id="overallLosses">0</strong></div>
+        <div class="overall-metric"><span>RESOLVED</span><strong id="overallResolved">0</strong></div>
+      </div>
+    </section>
+
     <section class="card">
       <div class="section-head"><div><h2>Status Scalping per Timeframe</h2><p>M1, M3 dan M5 menggunakan engine dan historical masing-masing.</p></div></div>
       <div id="tfGrid" class="tf-grid"></div>
     </section>
 
     <section class="card">
-      <div class="section-head"><div><h2>Winrate Masing-masing TF</h2><p>TP1–TP4 dihitung terpisah untuk M1, M3 dan M5.</p></div></div>
+      <div class="section-head"><div><h2>Winrate Masing-masing TF</h2><p>TP1–TP4 dihitung terpisah untuk M1, M3 dan M5. Overall tiap TF menggunakan TP1 sebagai WIN.</p></div></div>
       <div id="winrateByTf" class="winrate-tfs"></div>
     </section>
 
@@ -59,10 +71,10 @@
 
     <section class="card">
       <div class="section-head">
-        <div><h2>Historical Entry</h2><p>Pilih TF untuk melihat historical entry dan hasilnya secara terpisah.</p></div>
+        <div><h2>Historical Entry</h2><p>Hanya trade yang benar-benar menyentuh harga Entry yang masuk historical.</p></div>
         <div class="tabs" id="historyTabs"><button data-tf="ALL" class="active">ALL</button><button data-tf="M1">M1</button><button data-tf="M3">M3</button><button data-tf="M5">M5</button></div>
       </div>
-      <div class="table-wrap"><table><thead><tr><th>TF</th><th>Waktu</th><th>Side</th><th>Entry</th><th>SL</th><th>SL pips</th><th>TP1</th><th>TP2</th><th>TP3</th><th>TP4</th><th>Status</th></tr></thead><tbody id="history"></tbody></table></div>
+      <div class="table-wrap"><table><thead><tr><th>TF</th><th>Waktu</th><th>Side</th><th>Entry</th><th>SL</th><th>SL pips</th><th>TP1</th><th>TP2</th><th>TP3</th><th>TP4</th><th>Hasil</th></tr></thead><tbody id="history"></tbody></table></div>
     </section>
   </main>
   <script src="/app.js"></script>
