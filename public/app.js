@@ -15,12 +15,18 @@ function wrHtml(stats) {
   return stats.winrates.map(x => `<div class="wr"><span>TP${x.target}</span><strong>${x.winrate.toFixed(1)}%</strong><small>${x.wins}W / ${x.losses}L</small></div>`).join('');
 }
 
+function historyResult(x) {
+  if (x.outcome === 'WIN' || x.tpHits?.[0]) return `WIN${x.tpHits?.[3] ? ' • TP4' : x.tpHits?.[2] ? ' • TP3' : x.tpHits?.[1] ? ' • TP2' : ' • TP1'}`;
+  if (x.outcome === 'LOSS' || (x.status === 'closed' && x.result === 'SL')) return 'LOSS • SL';
+  return 'LIVE';
+}
+
 function renderHistory() {
   if (!lastData) return;
   const rows = historyFilter === 'ALL' ? lastData.history : lastData.timeframes[historyFilter].history.map(x => ({...x,timeframe:historyFilter}));
   $('history').innerHTML = rows.length ? rows.map(x => `<tr>
     <td><b>${x.timeframe}</b></td><td>${timeText(x.openedTime)}</td><td class="${x.dir==='buy'?'buytxt':'selltxt'}">${x.dir.toUpperCase()}</td>
-    <td>${fmt(x.entry)}</td><td>${fmt(x.sl)}</td><td>${Number(x.slPips).toFixed(1)}</td>${x.tps.map(t=>`<td>${fmt(t)}</td>`).join('')}<td>${x.result || x.status.toUpperCase()}</td>
+    <td>${fmt(x.entry)}</td><td>${fmt(x.sl)}</td><td>${Number(x.slPips).toFixed(1)}</td>${x.tps.map(t=>`<td>${fmt(t)}</td>`).join('')}<td>${historyResult(x)}</td>
   </tr>`).join('') : '<tr><td colspan="11" class="empty">Belum ada historical entry.</td></tr>';
 }
 
@@ -33,6 +39,13 @@ function render(data) {
   $('allLive').textContent = data.combined.liveTrades;
   $('allPending').textContent = data.combined.pending;
   $('allSkipped').textContent = data.combined.skipped;
+
+  const overall = data.combined.overall || { wins:0, losses:0, resolved:0, winrate:0 };
+  $('overallWinrate').textContent = `${Number(overall.winrate || 0).toFixed(1)}%`;
+  $('overallRecord').textContent = `${overall.wins || 0}W / ${overall.losses || 0}L`;
+  $('overallWins').textContent = overall.wins || 0;
+  $('overallLosses').textContent = overall.losses || 0;
+  $('overallResolved').textContent = overall.resolved || 0;
 
   const s = data.lastSignal;
   $('signalBox').className = 'signal ' + (s ? (s.dir === 'buy' ? 'buy' : 'sell') : 'neutral');
@@ -49,7 +62,11 @@ function render(data) {
     </article>`;
   }).join('');
 
-  $('winrateByTf').innerHTML = tfs.map(tf => `<article class="tf-wr-block"><div class="tf-wr-head"><h3>${tf}</h3><span>${data.timeframes[tf].stats.total} trades • ${data.timeframes[tf].stats.skipped} skipped</span></div><div class="wr-grid">${wrHtml(data.timeframes[tf].stats)}</div></article>`).join('');
+  $('winrateByTf').innerHTML = tfs.map(tf => {
+    const st = data.timeframes[tf].stats;
+    const p = st.primary || { winrate:0, wins:0, losses:0 };
+    return `<article class="tf-wr-block"><div class="tf-wr-head"><h3>${tf}</h3><span>Overall ${Number(p.winrate).toFixed(1)}% • ${p.wins}W/${p.losses}L • ${st.total} trades • ${st.skipped} skipped</span></div><div class="wr-grid">${wrHtml(st)}</div></article>`;
+  }).join('');
 
   const pending = tfs.flatMap(tf => data.timeframes[tf].pending.map(x => ({...x,timeframe:tf})));
   $('setups').innerHTML = pending.length ? pending.map(x => `<div class="row"><b>${x.timeframe}</b><b class="${x.dir==='buy'?'buytxt':'selltxt'}">${x.dir.toUpperCase()}</b><small>ENTRY ${fmt(x.plannedEntry)}</small><small>FVG ${fmt(x.fvgBottom)}–${fmt(x.fvgTop)}</small></div>`).join('') : '<div class="empty">Belum ada setup aktif.</div>';
