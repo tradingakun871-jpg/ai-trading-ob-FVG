@@ -39,5 +39,5 @@ app.post('/api/mt5/webhook', (req, res) => {
   } catch (e) { res.status(400).json({ ok:false, error:e.message }); }
 });
 
-app.get('*', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'index.html')));
+app.use((_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'index.html')));
 app.listen(port, () => console.log(`AI Trading OB+FVG listening on :${port}`));
