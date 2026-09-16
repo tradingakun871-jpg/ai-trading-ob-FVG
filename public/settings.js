@@ -26,6 +26,7 @@ async function loadConfig() {
     $('cfgSymbol').value = c.symbol || 'XAUUSD';
     $('cfgPip').value = c.pipSize ?? 0.1;
     $('cfgMaxSl').value = c.maxSwingSlPips ?? 50;
+    $('cfgSlBuffer').value = c.slBufferPips ?? 5;
     $('cfgEntry').value = c.fvgEntryMode || 'first_touch';
     $('cfgDisp').value = c.displacementAtr ?? 1.5;
     $('cfgAtr').value = c.atrPeriod ?? 14;
@@ -51,6 +52,7 @@ $('saveConfig').addEventListener('click', async () => {
         symbol: $('cfgSymbol').value.trim() || 'XAUUSD',
         pipSize: Number($('cfgPip').value),
         maxSwingSlPips: Number($('cfgMaxSl').value),
+        slBufferPips: Number($('cfgSlBuffer').value),
         fvgEntryMode: $('cfgEntry').value,
         displacementAtr: Number($('cfgDisp').value),
         atrPeriod: Number($('cfgAtr').value),
