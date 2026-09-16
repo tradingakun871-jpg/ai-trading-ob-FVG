@@ -56,6 +56,7 @@ export class StrategyEngine {
     this.trades = [];
     this.skipped = 0;
     this.lastSignal = null;
+    this.lastRealtimeTick = null;
   }
 
   updateConfig(patch = {}) {
@@ -132,6 +133,46 @@ export class StrategyEngine {
     }
   }
 
+  openTradeFromSetup(s, i, time, source = 'candle') {
+    const entry = plannedEntry(s.dir, s.fvgTop, s.fvgBottom, this.config.fvgEntryMode);
+    s.plannedEntry = entry;
+
+    const structuralSl = s.structuralSl;
+    const structuralSlPips = Math.abs(entry - structuralSl) / this.config.pipSize;
+
+    // Keep the original Swing Max rule: first validate the raw swing distance.
+    // Only after the setup passes, place the actual stop 5 pips (default)
+    // beyond the swing to reduce spike/stop-hunt exposure.
+    if (structuralSlPips > this.config.maxSwingSlPips) {
+      s.status = 'skipped';
+      s.skipReason = `Swing SL ${structuralSlPips.toFixed(1)} pips > ${this.config.maxSwingSlPips}`;
+      this.skipped++;
+      return { changed:true, opened:false };
+    }
+
+    const bufferPips = Math.max(0, Number(this.config.slBufferPips ?? 0));
+    const bufferPrice = bufferPips * this.config.pipSize;
+    const sl = s.dir === 'buy' ? structuralSl - bufferPrice : structuralSl + bufferPrice;
+    const slPips = Math.abs(entry - sl) / this.config.pipSize;
+    const tps = targets(s.dir, entry, sl, this.config.rr);
+    const openedTime = normTime(time);
+    const trade = {
+      id:`trade-${this.config.timeframe}-${i}-${s.dir}`, setupId:s.id, timeframe:this.config.timeframe,
+      dir:s.dir, entry, structuralSl, structuralSlPips, slBufferPips:bufferPips, sl, slPips, tps, opened:i, openedTime,
+      openedSource:source,
+      entryConfirmed:true,
+      status:'live', tpHits:[false,false,false,false], result:null,
+      armedFrom:i + 1,
+      realtimeArmedAfter:openedTime
+    };
+    this.trades.push(trade);
+    s.status = 'filled';
+    s.filledTime = openedTime;
+    s.filledSource = source;
+    this.lastSignal = { ...trade, symbol:this.config.symbol, timeframe:this.config.timeframe, time:openedTime };
+    return { changed:true, opened:true, trade };
+  }
+
   processSetups(i) {
     const c = this.candles[i];
     for (const s of this.setups) {
@@ -145,36 +186,7 @@ export class StrategyEngine {
       // A setup is NOT a trade until its exact entry level has been touched.
       // Pending / expired setups never enter this.trades, history, or winrate stats.
       if (!entryTouched) continue;
-
-      const structuralSl = s.structuralSl;
-      const structuralSlPips = Math.abs(entry - structuralSl) / this.config.pipSize;
-
-      // Keep the original Swing Max rule: first validate the raw swing distance.
-      // Only after the setup passes, place the actual stop 5 pips (default)
-      // beyond the swing to reduce spike/stop-hunt exposure.
-      if (structuralSlPips > this.config.maxSwingSlPips) {
-        s.status = 'skipped';
-        s.skipReason = `Swing SL ${structuralSlPips.toFixed(1)} pips > ${this.config.maxSwingSlPips}`;
-        this.skipped++;
-        continue;
-      }
-
-      const bufferPips = Math.max(0, Number(this.config.slBufferPips ?? 0));
-      const bufferPrice = bufferPips * this.config.pipSize;
-      const sl = s.dir === 'buy' ? structuralSl - bufferPrice : structuralSl + bufferPrice;
-      const slPips = Math.abs(entry - sl) / this.config.pipSize;
-
-      const tps = targets(s.dir, entry, sl, this.config.rr);
-      const trade = {
-        id:`trade-${this.config.timeframe}-${i}-${s.dir}`, setupId:s.id, timeframe:this.config.timeframe,
-        dir:s.dir, entry, structuralSl, structuralSlPips, slBufferPips:bufferPips, sl, slPips, tps, opened:i, openedTime:c.time,
-        entryConfirmed:true,
-        status:'live', tpHits:[false,false,false,false], result:null,
-        armedFrom:i + 1
-      };
-      this.trades.push(trade);
-      s.status = 'filled';
-      this.lastSignal = { ...trade, symbol:this.config.symbol, timeframe:this.config.timeframe, time:c.time };
+      this.openTradeFromSetup(s, i, c.time, 'candle');
     }
   }
 
@@ -183,8 +195,8 @@ export class StrategyEngine {
     for (const t of this.trades) {
       if (t.status !== 'live' || !t.entryConfirmed) continue;
 
-      // TP/SL evaluation starts only on the candle AFTER entry was confirmed.
-      // Therefore price reaching a TP/SL zone before entry cannot create a win/loss.
+      // Candle/backfill evaluation keeps the original conservative rule:
+      // TP/SL starts on the candle AFTER entry confirmation.
       if (i < (t.armedFrom ?? t.opened + 1)) continue;
 
       const slHit = t.dir === 'buy' ? c.low <= t.sl : c.high >= t.sl;
@@ -200,6 +212,73 @@ export class StrategyEngine {
       }
     }
     this.trades = this.trades.slice(-500);
+  }
+
+  processTick(tick) {
+    const price = Number(tick?.price);
+    const time = normTime(tick?.time ?? Date.now());
+    if (!Number.isFinite(price)) throw new Error('Invalid realtime tick price');
+    this.lastRealtimeTick = { price, time };
+
+    // Hybrid mode: candle-close logic still creates OB/FVG/setups.
+    // Live MT5 ticks only execute already-created pending entries and manage
+    // already-confirmed trades, so the strategy structure itself is unchanged.
+    let changed = false;
+    const i = Math.max(0, this.candles.length - 1);
+
+    for (const s of this.setups) {
+      if (s.status !== 'pending') continue;
+      const entry = plannedEntry(s.dir, s.fvgTop, s.fvgBottom, this.config.fvgEntryMode);
+      s.plannedEntry = entry;
+
+      // New BUY FVGs are above their pullback entry; new SELL FVGs are below it.
+      // Directional crossing makes a 2-second tick stream robust even if price
+      // jumps across the exact level between two samples.
+      const entryTouched = s.dir === 'buy' ? price <= entry : price >= entry;
+      if (!entryTouched) continue;
+      const opened = this.openTradeFromSetup(s, i, time, 'tick');
+      changed = changed || opened.changed;
+    }
+
+    for (const t of this.trades) {
+      if (t.status !== 'live' || !t.entryConfirmed) continue;
+
+      // Never evaluate TP/SL on the exact same tick that confirmed the entry.
+      // From the next received tick onward, sequence is known, so realtime
+      // management is safe without waiting for a full candle to close.
+      if (time <= Number(t.realtimeArmedAfter ?? t.openedTime ?? 0)) continue;
+
+      const slHit = t.dir === 'buy' ? price <= t.sl : price >= t.sl;
+      if (slHit) {
+        t.status = 'closed';
+        t.result = 'SL';
+        t.closed = i;
+        t.closedTime = time;
+        t.closedSource = 'tick';
+        changed = true;
+        continue;
+      }
+
+      for (let n = 0; n < t.tps.length; n++) {
+        const tp = t.tps[n];
+        const hit = t.dir === 'buy' ? price >= tp : price <= tp;
+        if (!t.tpHits[n] && hit) {
+          t.tpHits[n] = true;
+          changed = true;
+        }
+      }
+      if (t.tpHits[3]) {
+        t.status = 'closed';
+        t.result = 'TP4';
+        t.closed = i;
+        t.closedTime = time;
+        t.closedSource = 'tick';
+        changed = true;
+      }
+    }
+
+    this.trades = this.trades.slice(-500);
+    return { changed, price, time };
   }
 
   stats() {
@@ -237,8 +316,10 @@ export class StrategyEngine {
   snapshot() {
     return {
       config: clone(this.config),
-      price: this.candles.at(-1)?.close ?? null,
+      price: this.lastRealtimeTick?.price ?? this.candles.at(-1)?.close ?? null,
       lastCandleTime: this.candles.at(-1)?.time ?? null,
+      lastRealtimeTick: this.lastRealtimeTick ? clone(this.lastRealtimeTick) : null,
+      hybridRealtime:true,
       freshOB: this.obs.filter((x) => x.fresh),
       freshFVG: this.fvgs.filter((x) => x.fresh),
       pending: this.setups.filter((x) => x.status === 'pending'),
