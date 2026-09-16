@@ -66,6 +66,7 @@ function combinedSnapshot() {
   const overallLosses = TFS.reduce((n,tf)=>n + timeframes[tf].stats.primary.losses, 0);
   const overallResolved = overallWins + overallLosses;
   const overallWinrate = overallResolved ? +(overallWins / overallResolved * 100).toFixed(1) : 0;
+  const confirmedEntries = TFS.reduce((n,tf)=>n + timeframes[tf].stats.confirmedEntries, 0);
 
   return {
     symbol: engines.M1.config.symbol,
@@ -74,7 +75,8 @@ function combinedSnapshot() {
     lastSignal: signals[0] || null,
     history: histories,
     combined: {
-      totalTrades: TFS.reduce((n,tf)=>n+timeframes[tf].stats.total,0),
+      confirmedEntries,
+      totalTrades: confirmedEntries,
       liveTrades: TFS.reduce((n,tf)=>n+timeframes[tf].stats.live,0),
       pending: TFS.reduce((n,tf)=>n+timeframes[tf].pending.length,0),
       skipped: TFS.reduce((n,tf)=>n+timeframes[tf].stats.skipped,0),
@@ -83,7 +85,7 @@ function combinedSnapshot() {
         losses: overallLosses,
         resolved: overallResolved,
         winrate: overallWinrate,
-        rule: 'TP1 = WIN; SL sebelum TP1 = LOSS; belum entry / belum resolved tidak dihitung'
+        rule: 'Hanya entry yang sudah tersentuh yang dihitung. TP1 = WIN; SL sebelum TP1 = LOSS; pending/belum entry tidak dihitung.'
       }
     }
   };
