@@ -21,10 +21,18 @@ const mt5 = {
   lastSeen:null,
   lastCandle:null,
   lastTick:null,
+  lastRealtimeTransition:null,
   symbol:'XAUUSD',
   bid:null,
   ask:null,
   serverTime:null
+};
+
+const telegramMetrics = {
+  lastSentAt:null,
+  lastApiMs:null,
+  lastEvent:null,
+  lastTimeframe:null
 };
 
 app.use(express.json({ limit:'4mb' }));
@@ -82,8 +90,9 @@ function requireBridge(req, res) {
   return true;
 }
 
-async function sendTelegram(text) {
+async function sendTelegram(text, meta = {}) {
   if (!telegramReady()) return false;
+  const started = Date.now();
   try {
     const r = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
       method:'POST',
@@ -94,11 +103,17 @@ async function sendTelegram(text) {
         disable_web_page_preview:true
       })
     });
+    const apiMs = Date.now() - started;
     if (!r.ok) {
       const body = await r.text();
       console.error('Telegram send failed:', r.status, body);
       return false;
     }
+    telegramMetrics.lastSentAt = Date.now();
+    telegramMetrics.lastApiMs = apiMs;
+    telegramMetrics.lastEvent = meta.event || 'MESSAGE';
+    telegramMetrics.lastTimeframe = meta.tf || null;
+    console.log(`Telegram sent event=${telegramMetrics.lastEvent} tf=${telegramMetrics.lastTimeframe || '-'} apiMs=${apiMs}`);
     return true;
   } catch (e) {
     console.error('Telegram error:', e.message);
@@ -165,11 +180,13 @@ function pendingMessage(tf, s) {
 
 function dispatchTransitions(tf, beforeTrades, beforePending) {
   const engine = engines[tf];
+  let transitions = 0;
 
   for (const t of engine.trades) {
     const prev = beforeTrades.get(t.id);
     if (!prev) {
-      void sendTelegram(entryMessage(tf, t));
+      transitions++;
+      void sendTelegram(entryMessage(tf, t), { event:'ENTRY', tf });
       continue;
     }
 
@@ -177,20 +194,26 @@ function dispatchTransitions(tf, beforeTrades, beforePending) {
     for (let i = 0; i < t.tpHits.length; i++) {
       if (!prev.tpHits[i] && t.tpHits[i]) highestNewTp = i;
     }
-    if (highestNewTp >= 0) void sendTelegram(tpMessage(tf, t, highestNewTp));
+    if (highestNewTp >= 0) {
+      transitions++;
+      void sendTelegram(tpMessage(tf, t, highestNewTp), { event:`TP${highestNewTp + 1}`, tf });
+    }
 
     if (prev.status === 'live' && t.status === 'closed' && t.result === 'SL') {
-      void sendTelegram(slMessage(tf, t));
+      transitions++;
+      void sendTelegram(slMessage(tf, t), { event:'SL', tf });
     }
   }
 
   if (TELEGRAM_NOTIFY_PENDING) {
     for (const s of engine.setups) {
       if (s.status === 'pending' && !beforePending.has(s.id)) {
-        void sendTelegram(pendingMessage(tf, s));
+        transitions++;
+        void sendTelegram(pendingMessage(tf, s), { event:'PENDING', tf });
       }
     }
   }
+  return transitions;
 }
 
 function ingestEngine(tf, candle, notify = true) {
@@ -200,6 +223,25 @@ function ingestEngine(tf, candle, notify = true) {
   const result = engine.ingest(candle);
   if (notify) dispatchTransitions(tf, beforeTrades, beforePending);
   return result;
+}
+
+function processRealtimeTick(price, time) {
+  let changed = false;
+  let transitions = 0;
+  for (const tf of TFS) {
+    const engine = engines[tf];
+    const beforeTrades = tradeMap(engine);
+    const beforePending = pendingSet(engine);
+    const result = engine.processTick({ price, time });
+    if (!result.changed) continue;
+    changed = true;
+    transitions += dispatchTransitions(tf, beforeTrades, beforePending);
+  }
+  if (changed) {
+    mt5.lastRealtimeTransition = Date.now();
+    scheduleDbSync();
+  }
+  return { changed, transitions };
 }
 
 function rollupM1(candle, tf) {
@@ -247,7 +289,8 @@ function combinedSnapshot() {
   return {
     symbol: engines.M1.config.symbol,
     livePrice: mt5.bid ?? timeframes.M1.price,
-    strategy: 'Fresh OB + FVG | Swing SL Max 50 pips | TP 1R-4R',
+    strategy: 'Fresh OB + FVG | Hybrid Realtime Tick | Swing SL Max 50 pips | TP 1R-4R',
+    hybridRealtime:true,
     timeframes,
     lastSignal: signals[0] || null,
     history: histories,
@@ -255,9 +298,11 @@ function combinedSnapshot() {
     integrations: {
       mt5: {
         connected:mt5Connected(),
+        hybridRealtime:true,
         lastSeen:mt5.lastSeen,
         lastCandle:mt5.lastCandle,
         lastTick:mt5.lastTick,
+        lastRealtimeTransition:mt5.lastRealtimeTransition,
         symbol:mt5.symbol,
         bid:mt5.bid,
         ask:mt5.ask,
@@ -265,7 +310,11 @@ function combinedSnapshot() {
       },
       telegram: {
         configured:telegramReady(),
-        notifyPending:TELEGRAM_NOTIFY_PENDING
+        notifyPending:TELEGRAM_NOTIFY_PENDING,
+        lastSentAt:telegramMetrics.lastSentAt,
+        lastApiMs:telegramMetrics.lastApiMs,
+        lastEvent:telegramMetrics.lastEvent,
+        lastTimeframe:telegramMetrics.lastTimeframe
       }
     },
     combined: {
@@ -289,6 +338,7 @@ app.get('/api/health', (_req,res) => res.json({
   ok:true,
   service:'ai-trading-ob-fvg-mtf',
   timeframes:TFS,
+  hybridRealtime:true,
   mt5Connected:mt5Connected(),
   telegramConfigured:telegramReady(),
   databaseConfigured:databaseEnabled(),
@@ -396,7 +446,21 @@ app.post('/api/mt5/tick', (req,res) => {
     mt5.symbol = body.symbol || mt5.symbol;
     mt5.bid = Number.isFinite(Number(body.bid)) ? Number(body.bid) : mt5.bid;
     mt5.ask = Number.isFinite(Number(body.ask)) ? Number(body.ask) : mt5.ask;
-    res.json({ ok:true, mt5Connected:true });
+
+    // Hybrid realtime execution uses the same BID stream as the MT5 candle
+    // strategy reference. OB/FVG discovery remains candle-close only.
+    const realtimePrice = Number.isFinite(Number(mt5.bid)) ? Number(mt5.bid) : Number(mt5.ask);
+    const realtime = Number.isFinite(realtimePrice)
+      ? processRealtimeTick(realtimePrice, mt5.lastTick)
+      : { changed:false, transitions:0 };
+
+    res.json({
+      ok:true,
+      mt5Connected:true,
+      hybridRealtime:true,
+      realtimeChanged:realtime.changed,
+      transitions:realtime.transitions
+    });
   } catch(e) { res.status(400).json({ ok:false, error:e.message }); }
 });
 
@@ -423,15 +487,15 @@ app.post('/api/telegram/test-ui', async (req,res) => {
   if (!telegramReady()) return res.status(409).json({ ok:false, error:'Telegram is not configured on server.' });
   const raw = String(req.body?.message || '✅ AI Trading OB+FVG Telegram privat test berhasil.').trim();
   const message = raw.slice(0, 500);
-  const ok = await sendTelegram(message);
-  res.status(ok ? 200 : 502).json({ ok });
+  const ok = await sendTelegram(message, { event:'TEST' });
+  res.status(ok ? 200 : 502).json({ ok, apiMs:telegramMetrics.lastApiMs });
 });
 
 app.post('/api/telegram/test', async (req,res) => {
   if (!requireBridge(req,res)) return;
   if (!telegramReady()) return res.status(409).json({ ok:false, error:'Telegram is not configured. Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID.' });
-  const ok = await sendTelegram(req.body?.message || '✅ AI Trading OB+FVG Telegram connected. M1 / M3 / M5 notifications are active.');
-  res.status(ok ? 200 : 502).json({ ok });
+  const ok = await sendTelegram(req.body?.message || '✅ AI Trading OB+FVG Telegram connected. M1 / M3 / M5 notifications are active.', { event:'TEST' });
+  res.status(ok ? 200 : 502).json({ ok, apiMs:telegramMetrics.lastApiMs });
 });
 
 app.use((_req,res) => res.sendFile(path.join(__dirname, '..', 'public', 'index.html')));
