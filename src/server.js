@@ -11,6 +11,21 @@ const TF_MIN = { M1:1, M3:3, M5:5 };
 const engines = Object.fromEntries(TFS.map(tf => [tf, new StrategyEngine({ ...defaultConfig, timeframe:tf })]));
 const rollups = { M3:null, M5:null };
 
+const BRIDGE_TOKEN = process.env.BRIDGE_TOKEN || '';
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '';
+const TELEGRAM_NOTIFY_PENDING = String(process.env.TELEGRAM_NOTIFY_PENDING || 'false').toLowerCase() === 'true';
+
+const mt5 = {
+  lastSeen:null,
+  lastCandle:null,
+  lastTick:null,
+  symbol:'XAUUSD',
+  bid:null,
+  ask:null,
+  serverTime:null
+};
+
 app.use(express.json({ limit:'4mb' }));
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
@@ -25,6 +40,142 @@ const normTime = (v) => { const n = Number(v ?? Date.now()); return n < 1e12 ? n
 const normCandle = (c) => ({
   time:normTime(c.time), open:Number(c.open), high:Number(c.high), low:Number(c.low), close:Number(c.close), volume:Number(c.volume ?? 0)
 });
+const fmt = (v) => Number(v).toFixed(3);
+const telegramReady = () => Boolean(TELEGRAM_BOT_TOKEN && TELEGRAM_CHAT_ID);
+const mt5Connected = () => Boolean(mt5.lastSeen && Date.now() - mt5.lastSeen < 90_000);
+
+function requireBridge(req, res) {
+  if (!BRIDGE_TOKEN) {
+    res.status(503).json({ ok:false, error:'BRIDGE_TOKEN is not configured on server' });
+    return false;
+  }
+  const token = req.get('x-bridge-token') || req.query.token || '';
+  if (token !== BRIDGE_TOKEN) {
+    res.status(401).json({ ok:false, error:'invalid bridge token' });
+    return false;
+  }
+  return true;
+}
+
+async function sendTelegram(text) {
+  if (!telegramReady()) return false;
+  try {
+    const r = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body:JSON.stringify({
+        chat_id:TELEGRAM_CHAT_ID,
+        text,
+        disable_web_page_preview:true
+      })
+    });
+    if (!r.ok) {
+      const body = await r.text();
+      console.error('Telegram send failed:', r.status, body);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error('Telegram error:', e.message);
+    return false;
+  }
+}
+
+function tradeMap(engine) {
+  return new Map(engine.trades.map(t => [t.id, {
+    status:t.status,
+    result:t.result,
+    tpHits:[...t.tpHits]
+  }]));
+}
+
+function pendingSet(engine) {
+  return new Set(engine.setups.filter(s => s.status === 'pending').map(s => s.id));
+}
+
+function entryMessage(tf, t) {
+  const side = t.dir.toUpperCase();
+  const icon = t.dir === 'buy' ? '🟢' : '🔴';
+  return [
+    `${icon} ENTRY ${side} ${engines[tf].config.symbol} ${tf}`,
+    `Entry: ${fmt(t.entry)}`,
+    `SL: ${fmt(t.sl)} (${Number(t.slPips).toFixed(1)} pips)`,
+    `TP1: ${fmt(t.tps[0])}`,
+    `TP2: ${fmt(t.tps[1])}`,
+    `TP3: ${fmt(t.tps[2])}`,
+    `TP4: ${fmt(t.tps[3])}`,
+    `Method: Fresh OB + FVG`,
+    `Rule: Swing SL max ${engines[tf].config.maxSwingSlPips} pips`
+  ].join('\n');
+}
+
+function tpMessage(tf, t, highestIndex) {
+  const reached = highestIndex + 1;
+  return [
+    `✅ ${engines[tf].config.symbol} ${tf} ${t.dir.toUpperCase()} — TP${reached} HIT`,
+    `Entry: ${fmt(t.entry)}`,
+    `TP${reached}: ${fmt(t.tps[highestIndex])}`,
+    reached >= 1 ? `Status winrate utama: WIN` : ''
+  ].filter(Boolean).join('\n');
+}
+
+function slMessage(tf, t) {
+  const primaryAlreadyWon = Boolean(t.tpHits?.[0]);
+  return [
+    `⛔ ${engines[tf].config.symbol} ${tf} ${t.dir.toUpperCase()} — SL HIT`,
+    `Entry: ${fmt(t.entry)}`,
+    `SL: ${fmt(t.sl)}`,
+    primaryAlreadyWon ? `TP1 sudah tercapai sebelumnya — winrate utama tetap WIN` : `TP1 belum tercapai — hasil utama LOSS`
+  ].join('\n');
+}
+
+function pendingMessage(tf, s) {
+  return [
+    `⏳ SETUP ${s.dir.toUpperCase()} ${engines[tf].config.symbol} ${tf}`,
+    `Entry rencana: ${fmt(s.plannedEntry)}`,
+    `FVG: ${fmt(s.fvgBottom)} - ${fmt(s.fvgTop)}`,
+    `Status: PENDING — belum dihitung sampai Entry tersentuh`
+  ].join('\n');
+}
+
+function dispatchTransitions(tf, beforeTrades, beforePending) {
+  const engine = engines[tf];
+
+  for (const t of engine.trades) {
+    const prev = beforeTrades.get(t.id);
+    if (!prev) {
+      void sendTelegram(entryMessage(tf, t));
+      continue;
+    }
+
+    let highestNewTp = -1;
+    for (let i = 0; i < t.tpHits.length; i++) {
+      if (!prev.tpHits[i] && t.tpHits[i]) highestNewTp = i;
+    }
+    if (highestNewTp >= 0) void sendTelegram(tpMessage(tf, t, highestNewTp));
+
+    if (prev.status === 'live' && t.status === 'closed' && t.result === 'SL') {
+      void sendTelegram(slMessage(tf, t));
+    }
+  }
+
+  if (TELEGRAM_NOTIFY_PENDING) {
+    for (const s of engine.setups) {
+      if (s.status === 'pending' && !beforePending.has(s.id)) {
+        void sendTelegram(pendingMessage(tf, s));
+      }
+    }
+  }
+}
+
+function ingestEngine(tf, candle, notify = true) {
+  const engine = engines[tf];
+  const beforeTrades = notify ? tradeMap(engine) : null;
+  const beforePending = notify ? pendingSet(engine) : null;
+  const result = engine.ingest(candle);
+  if (notify) dispatchTransitions(tf, beforeTrades, beforePending);
+  return result;
+}
 
 function rollupM1(candle, tf) {
   const mins = TF_MIN[tf];
@@ -43,14 +194,14 @@ function rollupM1(candle, tf) {
   return null;
 }
 
-function ingestOne(tfRaw, candleRaw, autoAggregate = true) {
+function ingestOne(tfRaw, candleRaw, autoAggregate = true, notify = true) {
   const tf = normTf(tfRaw);
   const candle = normCandle(candleRaw);
-  const result = engines[tf].ingest(candle);
+  const result = ingestEngine(tf, candle, notify);
   if (tf === 'M1' && autoAggregate) {
     for (const higher of ['M3','M5']) {
       const completed = rollupM1(candle, higher);
-      if (completed) engines[higher].ingest(completed);
+      if (completed) ingestEngine(higher, completed, notify);
     }
   }
   return result;
@@ -70,10 +221,27 @@ function combinedSnapshot() {
 
   return {
     symbol: engines.M1.config.symbol,
+    livePrice: mt5.bid ?? timeframes.M1.price,
     strategy: 'Fresh OB + FVG | Swing SL Max 50 pips | TP 1R-4R',
     timeframes,
     lastSignal: signals[0] || null,
     history: histories,
+    integrations: {
+      mt5: {
+        connected:mt5Connected(),
+        lastSeen:mt5.lastSeen,
+        lastCandle:mt5.lastCandle,
+        lastTick:mt5.lastTick,
+        symbol:mt5.symbol,
+        bid:mt5.bid,
+        ask:mt5.ask,
+        serverTime:mt5.serverTime
+      },
+      telegram: {
+        configured:telegramReady(),
+        notifyPending:TELEGRAM_NOTIFY_PENDING
+      }
+    },
     combined: {
       confirmedEntries,
       totalTrades: confirmedEntries,
@@ -84,15 +252,23 @@ function combinedSnapshot() {
         wins: overallWins,
         losses: overallLosses,
         resolved: overallResolved,
-        winrate: overallWinrate,
-        rule: 'Hanya entry yang sudah tersentuh yang dihitung. TP1 = WIN; SL sebelum TP1 = LOSS; pending/belum entry tidak dihitung.'
+        winrate:overallWinrate,
+        rule:'Hanya entry yang sudah tersentuh yang dihitung. TP1 = WIN; SL sebelum TP1 = LOSS; pending/belum entry tidak dihitung.'
       }
     }
   };
 }
 
-app.get('/api/health', (_req,res) => res.json({ ok:true, service:'ai-trading-ob-fvg-mtf', timeframes:TFS, time:new Date().toISOString() }));
+app.get('/api/health', (_req,res) => res.json({
+  ok:true,
+  service:'ai-trading-ob-fvg-mtf',
+  timeframes:TFS,
+  mt5Connected:mt5Connected(),
+  telegramConfigured:telegramReady(),
+  time:new Date().toISOString()
+}));
 app.get('/api/status', (_req,res) => res.json(combinedSnapshot()));
+app.get('/api/integrations', (_req,res) => res.json(combinedSnapshot().integrations));
 app.get('/api/status/:tf', (req,res) => {
   try { res.json(engines[normTf(req.params.tf)].snapshot()); }
   catch(e) { res.status(400).json({ error:e.message }); }
@@ -125,7 +301,7 @@ app.post('/api/candle', (req,res) => {
     const body = req.body || {};
     const candle = body.candle || body;
     const tf = body.timeframe || candle.timeframe || 'M1';
-    ingestOne(tf, candle, body.autoAggregate !== false);
+    ingestOne(tf, candle, body.autoAggregate !== false, body.notify === true);
     res.json(combinedSnapshot());
   } catch(e) { res.status(400).json({ error:e.message }); }
 });
@@ -135,7 +311,7 @@ app.post('/api/candles', (req,res) => {
     const candles = Array.isArray(body) ? body : body.candles;
     if (!Array.isArray(candles)) return res.status(400).json({ error:'candles array required' });
     const defaultTf = body.timeframe || 'M1';
-    for (const c of candles) ingestOne(c.timeframe || defaultTf, c.candle || c, body.autoAggregate !== false);
+    for (const c of candles) ingestOne(c.timeframe || defaultTf, c.candle || c, body.autoAggregate !== false, body.notify === true);
     res.json(combinedSnapshot());
   } catch(e) { res.status(400).json({ error:e.message }); }
 });
@@ -146,15 +322,61 @@ app.post('/api/reset', (req,res) => {
     res.json({ ok:true, status:combinedSnapshot() });
   } catch(e) { res.status(400).json({ error:e.message }); }
 });
+
+app.post('/api/mt5/backfill', (req,res) => {
+  if (!requireBridge(req,res)) return;
+  try {
+    const body = req.body || {};
+    const candles = body.candles;
+    if (!Array.isArray(candles)) return res.status(400).json({ ok:false, error:'candles array required' });
+    const tf = body.timeframe || 'M1';
+    if (body.symbol) {
+      mt5.symbol = body.symbol;
+      TFS.forEach(x => engines[x].updateConfig({ symbol:body.symbol, timeframe:x }));
+    }
+    for (const c of candles) ingestOne(c.timeframe || tf, c, body.autoAggregate !== false, false);
+    mt5.lastSeen = Date.now();
+    res.json({ ok:true, imported:candles.length, status:combinedSnapshot() });
+  } catch(e) { res.status(400).json({ ok:false, error:e.message }); }
+});
+
+app.post('/api/mt5/tick', (req,res) => {
+  if (!requireBridge(req,res)) return;
+  try {
+    const body = req.body || {};
+    mt5.lastSeen = Date.now();
+    mt5.lastTick = normTime(body.time ?? Date.now());
+    mt5.serverTime = body.serverTime ? normTime(body.serverTime) : mt5.lastTick;
+    mt5.symbol = body.symbol || mt5.symbol;
+    mt5.bid = Number.isFinite(Number(body.bid)) ? Number(body.bid) : mt5.bid;
+    mt5.ask = Number.isFinite(Number(body.ask)) ? Number(body.ask) : mt5.ask;
+    res.json({ ok:true, mt5Connected:true });
+  } catch(e) { res.status(400).json({ ok:false, error:e.message }); }
+});
+
 app.post('/api/mt5/webhook', (req,res) => {
+  if (!requireBridge(req,res)) return;
   try {
     const body = req.body || {};
     const tf = body.timeframe || body.candle?.timeframe || 'M1';
-    if (body.symbol) TFS.forEach(x => engines[x].updateConfig({ symbol:body.symbol, timeframe:x }));
-    ingestOne(tf, body.candle || body, body.autoAggregate !== false);
+    if (body.symbol) {
+      mt5.symbol = body.symbol;
+      TFS.forEach(x => engines[x].updateConfig({ symbol:body.symbol, timeframe:x }));
+    }
+    mt5.lastSeen = Date.now();
+    const candle = body.candle || body;
+    mt5.lastCandle = normTime(candle.time ?? Date.now());
+    ingestOne(tf, candle, body.autoAggregate !== false, true);
     const snap = combinedSnapshot();
-    res.json({ ok:true, signal:snap.lastSignal, status:snap });
+    res.json({ ok:true, signal:snap.lastSignal, integrations:snap.integrations, status:snap });
   } catch(e) { res.status(400).json({ ok:false, error:e.message }); }
+});
+
+app.post('/api/telegram/test', async (req,res) => {
+  if (!requireBridge(req,res)) return;
+  if (!telegramReady()) return res.status(409).json({ ok:false, error:'Telegram is not configured. Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID.' });
+  const ok = await sendTelegram(req.body?.message || '✅ AI Trading OB+FVG Telegram connected. M1 / M3 / M5 notifications are active.');
+  res.status(ok ? 200 : 502).json({ ok });
 });
 
 app.use((_req,res) => res.sendFile(path.join(__dirname, '..', 'public', 'index.html')));
