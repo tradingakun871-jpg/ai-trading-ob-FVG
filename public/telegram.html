@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Telegram — AI Trading OB + FVG</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <div class="eyebrow">AI SCALPING ENGINE</div>
+      <h1>Telegram</h1>
+      <p>Status dan pengujian notifikasi trading M1 / M3 / M5.</p>
+    </div>
+    <div class="top-actions">
+      <nav class="main-nav" aria-label="Menu utama">
+        <a href="/">Dashboard</a>
+        <div class="nav-item has-submenu active-parent">
+          <button class="nav-trigger active" type="button" aria-haspopup="true">Settings <span>▾</span></button>
+          <div class="nav-submenu" role="menu">
+            <a href="/settings.html" role="menuitem">Strategy Settings</a>
+            <a class="active" href="/telegram.html" role="menuitem">Telegram</a>
+          </div>
+        </div>
+      </nav>
+      <div id="health" class="pill">CONNECTING</div>
+    </div>
+  </header>
+
+  <main class="layout settings-layout">
+    <section class="card settings-hero">
+      <div>
+        <div class="eyebrow">NOTIFICATION CHANNEL</div>
+        <h2>Telegram Signal Bot</h2>
+        <p class="muted">Notifikasi dikirim hanya untuk event engine yang valid.</p>
+      </div>
+      <div id="telegramBadge" class="settings-badges"><span>CHECK</span></div>
+    </section>
+
+    <section class="card">
+      <div class="section-head"><div><h2>Status Telegram</h2><p>Token bot dan Chat ID disimpan sebagai environment variable Railway, bukan ditampilkan di browser.</p></div></div>
+      <div class="rule-grid telegram-rule-grid">
+        <div class="rule"><span>Connection</span><strong id="tgStatus">CHECKING</strong><small id="tgDetail">Memeriksa konfigurasi...</small></div>
+        <div class="rule"><span>ENTRY</span><strong>ON</strong><small>BUY/SELL dikirim setelah harga Entry benar-benar tersentuh.</small></div>
+        <div class="rule"><span>TP</span><strong>ON</strong><small>TP1–TP4 dikirim saat level tercapai.</small></div>
+        <div class="rule"><span>SL</span><strong>ON</strong><small>SL dikirim setelah entry; setup pending tidak dihitung.</small></div>
+        <div class="rule"><span>PENDING</span><strong id="pendingStatus">OFF</strong><small>Opsional. Default tidak mengirim setup yang belum entry.</small></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="section-head"><div><h2>Test Telegram</h2><p>Masukkan Bridge Token hanya untuk melakukan test. Token tidak disimpan di browser.</p></div><button id="testTelegram">Kirim Test</button></div>
+      <div class="form-grid telegram-form">
+        <label>Bridge Token<input id="bridgeToken" type="password" autocomplete="off" placeholder="Masukkan Bridge Token" /></label>
+        <label>Pesan Test<input id="testMessage" value="✅ AI Trading OB+FVG Telegram test berhasil." /></label>
+      </div>
+      <p id="testResult" class="muted"></p>
+    </section>
+
+    <section class="card">
+      <div class="section-head"><div><h2>Environment Railway</h2><p>Telegram aktif jika dua variable berikut terisi pada service ai-trading-ob-FVG-mtf.</p></div></div>
+      <div class="rule-grid telegram-env-grid">
+        <div class="rule"><span>Variable</span><strong>TELEGRAM_BOT_TOKEN</strong><small>Token bot dari BotFather.</small></div>
+        <div class="rule"><span>Variable</span><strong>TELEGRAM_CHAT_ID</strong><small>ID user atau group tujuan.</small></div>
+        <div class="rule"><span>Optional</span><strong>TELEGRAM_NOTIFY_PENDING</strong><small>false = hanya ENTRY / TP / SL.</small></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/telegram.js"></script>
+</body>
+</html>
