@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Strategy Settings — AI Trading OB + FVG</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <div class="eyebrow">AI SCALPING ENGINE</div>
+      <h1>Strategy Settings</h1>
+      <p>Pengaturan shared untuk engine M1, M3 dan M5.</p>
+    </div>
+    <div class="top-actions">
+      <nav class="main-nav" aria-label="Menu utama">
+        <a href="/">Dashboard</a>
+        <a class="active" href="/settings.html">Strategy Settings</a>
+      </nav>
+      <div id="health" class="pill">CONNECTING</div>
+    </div>
+  </header>
+
+  <main class="layout settings-layout">
+    <section class="card settings-hero">
+      <div>
+        <div class="eyebrow">STRATEGY PROFILE</div>
+        <h2>OB + FVG Scalping</h2>
+        <p class="muted">Fresh OB + FVG • Swing SL maksimum • RR 1R / 2R / 3R / 4R</p>
+      </div>
+      <div class="settings-badges"><span>M1</span><span>M3</span><span>M5</span></div>
+    </section>
+
+    <section class="card">
+      <div class="section-head">
+        <div><h2>Core Strategy</h2><p>Setting ini diterapkan ke semua timeframe scalping.</p></div>
+        <button id="saveConfig">Simpan Perubahan</button>
+      </div>
+      <div class="form-grid settings-form">
+        <label>Symbol<input id="cfgSymbol" value="XAUUSD" /></label>
+        <label>1 Pip XAUUSD<input id="cfgPip" type="number" step="0.01" value="0.1" /></label>
+        <label>Max Swing SL (pips)<input id="cfgMaxSl" type="number" min="1" value="50" /></label>
+        <label>Entry FVG
+          <select id="cfgEntry">
+            <option value="first_touch">First Touch</option>
+            <option value="top">Atas FVG</option>
+            <option value="mid">Midpoint 50%</option>
+            <option value="bottom">Bawah FVG</option>
+          </select>
+        </label>
+        <label>Displacement ATR<input id="cfgDisp" type="number" step="0.1" min="0.1" value="1.5" /></label>
+        <label>ATR Period<input id="cfgAtr" type="number" min="1" value="14" /></label>
+        <label>Max Jarak OB → FVG (bar)<input id="cfgObFvgBars" type="number" min="1" value="6" /></label>
+        <label>Max Umur Fresh Zone (bar)<input id="cfgFreshAge" type="number" min="1" value="300" /></label>
+        <label>Setup Expiry (bar)<input id="cfgExpiry" type="number" min="1" value="100" /></label>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="section-head"><div><h2>Target & Risk Logic</h2><p>Ringkasan aturan yang sedang dipakai engine.</p></div></div>
+      <div class="rule-grid">
+        <div class="rule"><span>SL</span><strong>Swing OB</strong><small>Skip jika lebih dari batas maksimum.</small></div>
+        <div class="rule"><span>TP1</span><strong>1R</strong><small>1 × jarak Entry–SL</small></div>
+        <div class="rule"><span>TP2</span><strong>2R</strong><small>2 × jarak Entry–SL</small></div>
+        <div class="rule"><span>TP3</span><strong>3R</strong><small>3 × jarak Entry–SL</small></div>
+        <div class="rule"><span>TP4</span><strong>4R</strong><small>4 × jarak Entry–SL</small></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="section-head"><div><h2>Timeframe Scalping</h2><p>Ketiga TF menggunakan konfigurasi strategy yang sama tetapi statistiknya tetap terpisah.</p></div></div>
+      <div class="tf-grid settings-tf-grid">
+        <article class="tf-card"><div class="tf-title"><b>M1</b><span>SCALP FAST</span></div><p class="muted">Engine independen M1 dan sumber rollup untuk M3/M5 jika feed utama M1 digunakan.</p></article>
+        <article class="tf-card"><div class="tf-title"><b>M3</b><span>SCALP CORE</span></div><p class="muted">Winrate dan historical M3 dihitung terpisah dari M1 dan M5.</p></article>
+        <article class="tf-card"><div class="tf-title"><b>M5</b><span>SCALP FILTER</span></div><p class="muted">Winrate dan historical M5 dihitung terpisah.</p></article>
+      </div>
+    </section>
+
+    <div id="saveNotice" class="save-notice" role="status"></div>
+  </main>
+
+  <script src="/settings.js"></script>
+</body>
+</html>
