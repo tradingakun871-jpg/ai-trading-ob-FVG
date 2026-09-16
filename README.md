@@ -1,17 +1,86 @@
 # AI Trading OB + FVG
 
-Web trading engine baru untuk XAUUSD yang menerapkan logika hasil pengujian indikator V9.5.
+Web trading engine XAUUSD untuk scalping **M1 / M3 / M5** berdasarkan Fresh Order Block + Fresh FVG.
 
 ## Strategi utama
 
-- Method 1: Fresh Order Block + Fresh FVG.
 - Entry utama: FVG (`first_touch`, `top`, `mid`, atau `bottom`).
 - Order Block dipakai sebagai konteks setup dan sumber structural stop.
 - SL: swing high / swing low Order Block.
 - Maksimum Swing SL: **50 pips**. Jika lebih jauh, setup **SKIP** — bukan dipotong menjadi fixed SL.
 - TP1/TP2/TP3/TP4: **1R / 2R / 3R / 4R**.
-- Fresh OB/FVG dihapus dari status fresh setelah mitigasi / first touch.
-- Dashboard menampilkan fresh OB, fresh FVG, pending setup, live trade, historical entry, skipped setup, dan winrate TP1-TP4.
+- Setup belum menyentuh Entry tidak masuk total trade, historical, WIN, atau LOSS.
+- TP1 tersentuh setelah Entry = **WIN** untuk winrate utama.
+- SL sebelum TP1 setelah Entry = **LOSS**.
+- M1, M3, dan M5 memiliki winrate dan historical masing-masing.
+
+## Live website
+
+`https://ai-trading-ob-fvg-mtf-production.up.railway.app`
+
+## MT5 Bridge
+
+File EA:
+
+`mt5/AI_Trading_OB_FVG_Bridge.mq5`
+
+Bridge cukup mengirim candle **M1**. Server otomatis membentuk candle M3 dan M5, sehingga ketiga engine berjalan dari sumber yang sama.
+
+### Instalasi MT5
+
+1. MT5 → **File → Open Data Folder**.
+2. Buka `MQL5/Experts`.
+3. Copy `AI_Trading_OB_FVG_Bridge.mq5` ke folder tersebut.
+4. Buka MetaEditor, compile file EA.
+5. MT5 → **Tools → Options → Expert Advisors**.
+6. Centang **Allow WebRequest for listed URL**.
+7. Tambahkan:
+   `https://ai-trading-ob-fvg-mtf-production.up.railway.app`
+8. Pasang EA pada chart apa pun.
+9. Isi `BridgeSymbol` sesuai nama XAUUSD di broker (`XAUUSD`, `XAUUSDm`, dll).
+10. Isi `BridgeToken` dengan token private yang ada di Railway service.
+
+Pada startup bridge akan mengirim backfill M1 tanpa Telegram historical spam. Setelah itu bridge mengirim:
+
+- live Bid/Ask setiap beberapa detik ke `/api/mt5/tick`
+- candle M1 yang baru selesai ke `/api/mt5/webhook`
+- historical M1 awal ke `/api/mt5/backfill`
+
+## Telegram
+
+Server mendukung notifikasi Telegram untuk:
+
+- Entry BUY/SELL yang benar-benar tersentuh
+- TP1 / TP2 / TP3 / TP4
+- SL
+- Pending setup opsional (`TELEGRAM_NOTIFY_PENDING=true`)
+
+Environment variables Railway:
+
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_CHAT_ID`
+- `TELEGRAM_NOTIFY_PENDING=false`
+
+Test endpoint:
+
+`POST /api/telegram/test`
+
+Endpoint MT5/Telegram test dilindungi header `X-Bridge-Token`.
+
+## API utama
+
+- `GET /api/health`
+- `GET /api/status`
+- `GET /api/integrations`
+- `GET /api/config`
+- `POST /api/config`
+- `POST /api/candle`
+- `POST /api/candles`
+- `POST /api/mt5/backfill`
+- `POST /api/mt5/tick`
+- `POST /api/mt5/webhook`
+- `POST /api/telegram/test`
+- `GET /api/signals`
 
 ## Menjalankan lokal
 
@@ -22,42 +91,6 @@ npm start
 
 Buka `http://localhost:3000`.
 
-## API utama
+## Catatan persistence
 
-- `GET /api/health`
-- `GET /api/status`
-- `GET /api/config`
-- `POST /api/config`
-- `POST /api/candle`
-- `POST /api/candles`
-- `POST /api/mt5/webhook`
-- `GET /api/signals`
-
-Contoh candle:
-
-```json
-{
-  "symbol": "XAUUSD",
-  "timeframe": "M3",
-  "candle": {
-    "time": 1789545600000,
-    "open": 4300.1,
-    "high": 4303.5,
-    "low": 4298.2,
-    "close": 4302.9,
-    "volume": 1200
-  }
-}
-```
-
-## Railway
-
-Repository sudah dilengkapi `Dockerfile` dan `railway.json`. Hubungkan repository ini ke Railway lalu deploy. Railway akan menggunakan `/api/health` sebagai health check.
-
-## Tahap berikutnya
-
-1. MT5 Bridge mengirim candle close ke `/api/mt5/webhook`.
-2. Tambah persistence PostgreSQL agar historical tidak hilang saat restart.
-3. Telegram signal untuk setup PENDING / ENTRY / TP / SL.
-4. Auto-trade bridge MT5 terpisah dengan kontrol risk dan enable/disable.
-5. Data live Twelve Data sebagai fallback / monitoring dashboard.
+Historical dan candle engine saat ini masih berada di memory service. Backfill MT5 mengisi ulang data pada saat EA dijalankan. PostgreSQL persistence dapat ditambahkan pada tahap berikutnya agar data tetap ada setelah restart/deploy Railway.
