@@ -3,6 +3,7 @@ const fmt = (v) => Number.isFinite(Number(v)) ? Number(v).toFixed(3) : '—';
 const tfs = ['M1','M3','M5'];
 let lastData = null;
 let dbHistory = null;
+let dbPerformance = null;
 let historyFilter = 'ALL';
 
 async function api(path, options) {
@@ -49,6 +50,7 @@ function setPeriod(prefix, p = {}) {
 
 function renderPerformance(p) {
   if (!p) return;
+  dbPerformance = p;
   $('dbStatus').textContent = p.database ? `DATABASE ACTIVE • ${p.timezone || 'Asia/Jakarta'}` : 'DATABASE OFFLINE';
   $('dbStatus').className = p.database ? 'status-ok' : 'status-bad';
   setPeriod('daily', p.daily);
@@ -63,6 +65,48 @@ function renderPerformance(p) {
   $('overallResolved').textContent = o.resolved || 0;
   $('overallProfitFactor').textContent = pfText(o.profitFactor, o.grossProfitPips);
   $('allTrades').textContent = o.signals || 0;
+  renderWinrateByTf();
+}
+
+function targetStats(rows, n) {
+  const wins = rows.filter(x => x.tpHits?.[n]).length;
+  const losses = rows.filter(x => !x.tpHits?.[n] && x.status === 'closed' && x.result === 'SL').length;
+  const resolved = wins + losses;
+  return { target:n+1, wins, losses, resolved, winrate:resolved ? +(wins / resolved * 100).toFixed(1) : 0 };
+}
+
+function persistentStatsForTf(tf) {
+  if (!Array.isArray(dbHistory)) return null;
+  const rows = dbHistory.filter(x => x.timeframe === tf);
+  const perf = dbPerformance?.timeframes?.[tf] || null;
+  const primaryWins = perf ? Number(perf.wins || 0) : rows.filter(x => x.tpHits?.[0] || x.outcome === 'WIN').length;
+  const primaryLosses = perf ? Number(perf.losses || 0) : rows.filter(x => !x.tpHits?.[0] && x.status === 'closed' && x.result === 'SL').length;
+  const primaryResolved = primaryWins + primaryLosses;
+  return {
+    confirmedEntries: perf ? Number(perf.signals || 0) : rows.length,
+    total: perf ? Number(perf.signals || 0) : rows.length,
+    primary: {
+      wins:primaryWins,
+      losses:primaryLosses,
+      resolved:primaryResolved,
+      winrate:perf ? Number(perf.winrate || 0) : (primaryResolved ? +(primaryWins / primaryResolved * 100).toFixed(1) : 0)
+    },
+    winrates:[0,1,2,3].map(n => targetStats(rows, n))
+  };
+}
+
+function renderWinrateByTf() {
+  if (!lastData) return;
+  $('winrateByTf').innerHTML = tfs.map(tf => {
+    const memory = lastData.timeframes[tf].stats;
+    const persisted = persistentStatsForTf(tf);
+    const st = persisted || memory;
+    const p = st.primary || { winrate:0, wins:0, losses:0 };
+    const entries = st.confirmedEntries ?? st.total ?? 0;
+    const skipped = memory.skipped || 0;
+    const source = persisted ? 'DB' : 'LIVE';
+    return `<article class="tf-wr-block"><div class="tf-wr-head"><h3>${tf}</h3><span>Overall ${Number(p.winrate || 0).toFixed(1)}% • ${p.wins || 0}W/${p.losses || 0}L • ${entries} entry • ${skipped} skipped • ${source}</span></div><div class="wr-grid">${wrHtml(st)}</div></article>`;
+  }).join('');
 }
 
 function render(data) {
@@ -105,12 +149,7 @@ function render(data) {
     </article>`;
   }).join('');
 
-  $('winrateByTf').innerHTML = tfs.map(tf => {
-    const st = data.timeframes[tf].stats;
-    const p = st.primary || { winrate:0, wins:0, losses:0 };
-    const entries = st.confirmedEntries ?? st.total ?? 0;
-    return `<article class="tf-wr-block"><div class="tf-wr-head"><h3>${tf}</h3><span>Overall ${Number(p.winrate).toFixed(1)}% • ${p.wins}W/${p.losses}L • ${entries} entry • ${st.skipped} skipped</span></div><div class="wr-grid">${wrHtml(st)}</div></article>`;
-  }).join('');
+  renderWinrateByTf();
 
   const pending = tfs.flatMap(tf => data.timeframes[tf].pending.map(x => ({...x,timeframe:tf})));
   $('setups').innerHTML = pending.length ? pending.map(x => `<div class="row"><b>${x.timeframe}</b><b class="${x.dir==='buy'?'buytxt':'selltxt'}">${x.dir.toUpperCase()}</b><small>ENTRY ${fmt(x.plannedEntry)}</small><small>FVG ${fmt(x.fvgBottom)}–${fmt(x.fvgTop)}</small></div>`).join('') : '<div class="empty">Belum ada setup aktif.</div>';
@@ -127,11 +166,11 @@ async function load() {
     render(data);
     const [perf, hist] = await Promise.all([
       api('/api/performance').catch(e => { console.error('performance', e); return null; }),
-      api('/api/history?limit=1000').catch(e => { console.error('history', e); return null; })
+      api('/api/history?limit=2000').catch(e => { console.error('history', e); return null; })
     ]);
     if (perf) renderPerformance(perf);
-    else { $('dbStatus').textContent = 'DATABASE OFFLINE'; $('dbStatus').className = 'status-bad'; }
-    if (hist?.history) { dbHistory = hist.history; renderHistory(); }
+    else { dbPerformance = null; $('dbStatus').textContent = 'DATABASE OFFLINE'; $('dbStatus').className = 'status-bad'; }
+    if (hist?.history) { dbHistory = hist.history; renderHistory(); renderWinrateByTf(); }
   } catch(e) {
     $('health').textContent='OFFLINE'; $('health').className='pill'; console.error(e);
   }
