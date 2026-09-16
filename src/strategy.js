@@ -140,6 +140,9 @@ export class StrategyEngine {
       const entry = plannedEntry(s.dir, s.fvgTop, s.fvgBottom, this.config.fvgEntryMode);
       s.plannedEntry = entry;
       const entryTouched = c.high >= entry && c.low <= entry;
+
+      // A setup is NOT a trade until its exact entry level has been touched.
+      // Pending / expired setups never enter this.trades, history, or winrate stats.
       if (!entryTouched) continue;
 
       const sl = s.structuralSl;
@@ -155,6 +158,7 @@ export class StrategyEngine {
       const trade = {
         id:`trade-${this.config.timeframe}-${i}-${s.dir}`, setupId:s.id, timeframe:this.config.timeframe,
         dir:s.dir, entry, sl, slPips, tps, opened:i, openedTime:c.time,
+        entryConfirmed:true,
         status:'live', tpHits:[false,false,false,false], result:null,
         armedFrom:i + 1
       };
@@ -167,11 +171,10 @@ export class StrategyEngine {
   processTrades(i) {
     const c = this.candles[i];
     for (const t of this.trades) {
-      if (t.status !== 'live') continue;
+      if (t.status !== 'live' || !t.entryConfirmed) continue;
 
-      // Exit/TP evaluation starts only on the candle AFTER entry was confirmed.
-      // This prevents a pre-entry excursion inside the entry candle from being
-      // misclassified as TP or SL when only OHLC data is available.
+      // TP/SL evaluation starts only on the candle AFTER entry was confirmed.
+      // Therefore price reaching a TP/SL zone before entry cannot create a win/loss.
       if (i < (t.armedFrom ?? t.opened + 1)) continue;
 
       const slHit = t.dir === 'buy' ? c.low <= t.sl : c.high >= t.sl;
@@ -190,10 +193,11 @@ export class StrategyEngine {
   }
 
   stats() {
-    const all = this.trades;
+    // this.trades contains confirmed entries only.
+    const all = this.trades.filter((t) => t.entryConfirmed === true);
 
     // Primary/overall winrate rule:
-    // TP1 touched = WIN. SL before TP1 = LOSS. Pending/live without TP1 is unresolved.
+    // TP1 touched = WIN. SL before TP1 = LOSS. Live/unresolved trades are excluded.
     const primaryWins = all.filter((t) => t.tpHits[0]).length;
     const primaryLosses = all.filter((t) => !t.tpHits[0] && t.status === 'closed' && t.result === 'SL').length;
     const primaryResolved = primaryWins + primaryLosses;
@@ -210,7 +214,14 @@ export class StrategyEngine {
       const resolved = wins + losses;
       return { target:n+1, wins, losses, resolved, winrate:resolved ? +(wins/resolved*100).toFixed(1) : 0 };
     });
-    return { total:all.length, live:all.filter(t => t.status === 'live').length, skipped:this.skipped, primary, winrates:wr };
+    return {
+      total:all.length,
+      confirmedEntries:all.length,
+      live:all.filter(t => t.status === 'live').length,
+      skipped:this.skipped,
+      primary,
+      winrates:wr
+    };
   }
 
   snapshot() {
@@ -221,8 +232,8 @@ export class StrategyEngine {
       freshOB: this.obs.filter((x) => x.fresh),
       freshFVG: this.fvgs.filter((x) => x.fresh),
       pending: this.setups.filter((x) => x.status === 'pending'),
-      liveTrades: this.trades.filter((x) => x.status === 'live'),
-      history: this.trades.slice(-100).reverse().map((t) => ({ ...t, outcome:tradeOutcome(t) })),
+      liveTrades: this.trades.filter((x) => x.entryConfirmed === true && x.status === 'live'),
+      history: this.trades.filter((x) => x.entryConfirmed === true).slice(-100).reverse().map((t) => ({ ...t, outcome:tradeOutcome(t) })),
       stats: this.stats(),
       lastSignal: this.lastSignal,
     };
