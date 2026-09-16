@@ -8,6 +8,7 @@ export const defaultConfig = {
   pivotStrength: 4,
   pipSize: 0.1,
   maxSwingSlPips: 50,
+  slBufferPips: 5,
   fvgEntryMode: 'first_touch',
   rr: [1, 2, 3, 4],
   maxObFvgBars: 6,
@@ -145,11 +146,14 @@ export class StrategyEngine {
       // Pending / expired setups never enter this.trades, history, or winrate stats.
       if (!entryTouched) continue;
 
-      const sl = s.structuralSl;
+      const structuralSl = s.structuralSl;
+      const bufferPips = Math.max(0, Number(this.config.slBufferPips ?? 0));
+      const bufferPrice = bufferPips * this.config.pipSize;
+      const sl = s.dir === 'buy' ? structuralSl - bufferPrice : structuralSl + bufferPrice;
       const slPips = Math.abs(entry - sl) / this.config.pipSize;
       if (slPips > this.config.maxSwingSlPips) {
         s.status = 'skipped';
-        s.skipReason = `Swing SL ${slPips.toFixed(1)} pips > ${this.config.maxSwingSlPips}`;
+        s.skipReason = `Swing + buffer SL ${slPips.toFixed(1)} pips > ${this.config.maxSwingSlPips}`;
         this.skipped++;
         continue;
       }
@@ -157,7 +161,7 @@ export class StrategyEngine {
       const tps = targets(s.dir, entry, sl, this.config.rr);
       const trade = {
         id:`trade-${this.config.timeframe}-${i}-${s.dir}`, setupId:s.id, timeframe:this.config.timeframe,
-        dir:s.dir, entry, sl, slPips, tps, opened:i, openedTime:c.time,
+        dir:s.dir, entry, structuralSl, slBufferPips:bufferPips, sl, slPips, tps, opened:i, openedTime:c.time,
         entryConfirmed:true,
         status:'live', tpHits:[false,false,false,false], result:null,
         armedFrom:i + 1
