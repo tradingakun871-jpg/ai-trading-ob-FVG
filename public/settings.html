@@ -16,7 +16,12 @@
     <div class="top-actions">
       <nav class="main-nav" aria-label="Menu utama">
         <a href="/">Dashboard</a>
-        <a class="active" href="/settings.html">Strategy Settings</a>
+        <div class="nav-item has-submenu active-parent">
+          <button class="nav-trigger active" type="button" aria-haspopup="true">Settings <span>▾</span></button>
+          <div class="nav-submenu" role="menu">
+            <a class="active" href="/settings.html" role="menuitem">Strategy Settings</a>
+          </div>
+        </div>
       </nav>
       <div id="health" class="pill">CONNECTING</div>
     </div>
