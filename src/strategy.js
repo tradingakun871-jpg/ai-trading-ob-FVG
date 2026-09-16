@@ -147,21 +147,27 @@ export class StrategyEngine {
       if (!entryTouched) continue;
 
       const structuralSl = s.structuralSl;
-      const bufferPips = Math.max(0, Number(this.config.slBufferPips ?? 0));
-      const bufferPrice = bufferPips * this.config.pipSize;
-      const sl = s.dir === 'buy' ? structuralSl - bufferPrice : structuralSl + bufferPrice;
-      const slPips = Math.abs(entry - sl) / this.config.pipSize;
-      if (slPips > this.config.maxSwingSlPips) {
+      const structuralSlPips = Math.abs(entry - structuralSl) / this.config.pipSize;
+
+      // Keep the original Swing Max rule: first validate the raw swing distance.
+      // Only after the setup passes, place the actual stop 5 pips (default)
+      // beyond the swing to reduce spike/stop-hunt exposure.
+      if (structuralSlPips > this.config.maxSwingSlPips) {
         s.status = 'skipped';
-        s.skipReason = `Swing + buffer SL ${slPips.toFixed(1)} pips > ${this.config.maxSwingSlPips}`;
+        s.skipReason = `Swing SL ${structuralSlPips.toFixed(1)} pips > ${this.config.maxSwingSlPips}`;
         this.skipped++;
         continue;
       }
 
+      const bufferPips = Math.max(0, Number(this.config.slBufferPips ?? 0));
+      const bufferPrice = bufferPips * this.config.pipSize;
+      const sl = s.dir === 'buy' ? structuralSl - bufferPrice : structuralSl + bufferPrice;
+      const slPips = Math.abs(entry - sl) / this.config.pipSize;
+
       const tps = targets(s.dir, entry, sl, this.config.rr);
       const trade = {
         id:`trade-${this.config.timeframe}-${i}-${s.dir}`, setupId:s.id, timeframe:this.config.timeframe,
-        dir:s.dir, entry, structuralSl, slBufferPips:bufferPips, sl, slPips, tps, opened:i, openedTime:c.time,
+        dir:s.dir, entry, structuralSl, structuralSlPips, slBufferPips:bufferPips, sl, slPips, tps, opened:i, openedTime:c.time,
         entryConfirmed:true,
         status:'live', tpHits:[false,false,false,false], result:null,
         armedFrom:i + 1
