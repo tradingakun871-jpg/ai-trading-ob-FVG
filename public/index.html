@@ -29,8 +29,19 @@
 
   <main class="layout">
     <section class="hero card">
-      <div class="price-wrap"><span id="symbol">XAUUSD</span><strong id="price">—</strong><span class="muted">M1 live feed</span></div>
+      <div class="price-wrap"><span id="symbol">XAUUSD</span><strong id="price">—</strong><span class="muted">MT5 live price</span></div>
       <div id="signalBox" class="signal neutral"><span>LAST SIGNAL ALL TF</span><b id="signal">WAITING</b><small id="signalTime">Belum ada entry valid</small></div>
+    </section>
+
+    <section class="columns integration-grid">
+      <article class="card integration-card">
+        <div><span class="muted">MT5 BRIDGE</span><strong id="mt5Status">OFFLINE</strong></div>
+        <small id="mt5Detail" class="muted">Menunggu heartbeat dari MT5</small>
+      </article>
+      <article class="card integration-card">
+        <div><span class="muted">TELEGRAM</span><strong id="telegramStatus">NOT CONFIGURED</strong></div>
+        <small id="telegramDetail" class="muted">Bot token dan chat ID belum aktif</small>
+      </article>
     </section>
 
     <section class="stats-grid">
