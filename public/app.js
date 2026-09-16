@@ -2,6 +2,7 @@ const $ = (id) => document.getElementById(id);
 const fmt = (v) => Number.isFinite(Number(v)) ? Number(v).toFixed(3) : '—';
 const tfs = ['M1','M3','M5'];
 let lastData = null;
+let dbHistory = null;
 let historyFilter = 'ALL';
 
 async function api(path, options) {
@@ -9,7 +10,7 @@ async function api(path, options) {
   if (!r.ok) throw new Error(await r.text());
   return r.json();
 }
-const timeText = (v) => v ? new Date(v).toLocaleString() : '—';
+const timeText = (v) => v ? new Date(v).toLocaleString('id-ID', { timeZone:'Asia/Jakarta' }) : '—';
 
 function wrHtml(stats) {
   return stats.winrates.map(x => `<div class="wr"><span>TP${x.target}</span><strong>${x.winrate.toFixed(1)}%</strong><small>${x.wins}W / ${x.losses}L</small></div>`).join('');
@@ -23,11 +24,45 @@ function historyResult(x) {
 
 function renderHistory() {
   if (!lastData) return;
-  const rows = historyFilter === 'ALL' ? lastData.history : lastData.timeframes[historyFilter].history.map(x => ({...x,timeframe:historyFilter}));
+  const baseRows = Array.isArray(dbHistory) ? dbHistory : lastData.history;
+  const rows = historyFilter === 'ALL' ? baseRows : baseRows.filter(x => x.timeframe === historyFilter);
   $('history').innerHTML = rows.length ? rows.map(x => `<tr>
-    <td><b>${x.timeframe}</b></td><td>${timeText(x.openedTime)}</td><td class="${x.dir==='buy'?'buytxt':'selltxt'}">${x.dir.toUpperCase()}</td>
-    <td>${fmt(x.entry)}</td><td>${fmt(x.sl)}</td><td>${Number(x.slPips).toFixed(1)}</td>${x.tps.map(t=>`<td>${fmt(t)}</td>`).join('')}<td>${historyResult(x)}</td>
+    <td><b>${x.timeframe}</b></td><td>${timeText(x.openedTime)}</td><td class="${x.dir==='buy'?'buytxt':'selltxt'}">${String(x.dir || '').toUpperCase()}</td>
+    <td>${fmt(x.entry)}</td><td>${fmt(x.sl)}</td><td>${Number(x.slPips || 0).toFixed(1)}</td>${(x.tps || []).map(t=>`<td>${fmt(t)}</td>`).join('')}<td>${historyResult(x)}</td>
   </tr>`).join('') : '<tr><td colspan="11" class="empty">Belum ada historical entry.</td></tr>';
+}
+
+function pfText(v, grossProfit = 0) {
+  if (v == null && Number(grossProfit) > 0) return '∞';
+  return Number(v || 0).toFixed(2);
+}
+
+function setPeriod(prefix, p = {}) {
+  $(`${prefix}Signals`).textContent = `${p.signals || 0} sinyal`;
+  $(`${prefix}Winrate`).textContent = `${Number(p.winrate || 0).toFixed(1)}%`;
+  $(`${prefix}Record`).textContent = `${p.wins || 0}W / ${p.losses || 0}L`;
+  const net = Number(p.netPips || 0);
+  const el = $(`${prefix}Net`);
+  el.textContent = `${net > 0 ? '+' : ''}${net.toFixed(1)} pips`;
+  el.className = net > 0 ? 'positive' : net < 0 ? 'negative' : '';
+}
+
+function renderPerformance(p) {
+  if (!p) return;
+  $('dbStatus').textContent = p.database ? `DATABASE ACTIVE • ${p.timezone || 'Asia/Jakarta'}` : 'DATABASE OFFLINE';
+  $('dbStatus').className = p.database ? 'status-ok' : 'status-bad';
+  setPeriod('daily', p.daily);
+  setPeriod('weekly', p.weekly);
+  setPeriod('monthly', p.monthly);
+
+  const o = p.overall || {};
+  $('overallWinrate').textContent = `${Number(o.winrate || 0).toFixed(1)}%`;
+  $('overallRecord').textContent = `${o.wins || 0}W / ${o.losses || 0}L`;
+  $('overallWins').textContent = o.wins || 0;
+  $('overallLosses').textContent = o.losses || 0;
+  $('overallResolved').textContent = o.resolved || 0;
+  $('overallProfitFactor').textContent = pfText(o.profitFactor, o.grossProfitPips);
+  $('allTrades').textContent = o.signals || 0;
 }
 
 function render(data) {
@@ -87,8 +122,19 @@ function render(data) {
 }
 
 async function load() {
-  try { render(await api('/api/status')); }
-  catch(e) { $('health').textContent='OFFLINE'; $('health').className='pill'; console.error(e); }
+  try {
+    const data = await api('/api/status');
+    render(data);
+    const [perf, hist] = await Promise.all([
+      api('/api/performance').catch(e => { console.error('performance', e); return null; }),
+      api('/api/history?limit=1000').catch(e => { console.error('history', e); return null; })
+    ]);
+    if (perf) renderPerformance(perf);
+    else { $('dbStatus').textContent = 'DATABASE OFFLINE'; $('dbStatus').className = 'status-bad'; }
+    if (hist?.history) { dbHistory = hist.history; renderHistory(); }
+  } catch(e) {
+    $('health').textContent='OFFLINE'; $('health').className='pill'; console.error(e);
+  }
 }
 
 $('historyTabs').addEventListener('click', e => {
