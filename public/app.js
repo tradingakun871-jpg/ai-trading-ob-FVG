@@ -35,7 +35,7 @@ function render(data) {
   $('health').textContent = 'ONLINE'; $('health').className = 'pill ok';
   $('symbol').textContent = data.symbol;
   $('price').textContent = data.timeframes.M1.price == null ? '—' : fmt(data.timeframes.M1.price);
-  $('allTrades').textContent = data.combined.totalTrades;
+  $('allTrades').textContent = data.combined.confirmedEntries ?? data.combined.totalTrades ?? 0;
   $('allLive').textContent = data.combined.liveTrades;
   $('allPending').textContent = data.combined.pending;
   $('allSkipped').textContent = data.combined.skipped;
@@ -57,7 +57,7 @@ function render(data) {
     const sig = d.lastSignal;
     return `<article class="tf-card">
       <div class="tf-title"><b>${tf}</b><span>${d.price == null ? '—' : fmt(d.price)}</span></div>
-      <div class="tf-metrics"><div><small>Fresh OB</small><strong>${d.freshOB.length}</strong></div><div><small>Fresh FVG</small><strong>${d.freshFVG.length}</strong></div><div><small>Pending</small><strong>${d.pending.length}</strong></div><div><small>Trade</small><strong>${d.stats.total}</strong></div></div>
+      <div class="tf-metrics"><div><small>Fresh OB</small><strong>${d.freshOB.length}</strong></div><div><small>Fresh FVG</small><strong>${d.freshFVG.length}</strong></div><div><small>Pending</small><strong>${d.pending.length}</strong></div><div><small>Entry</small><strong>${d.stats.confirmedEntries ?? d.stats.total ?? 0}</strong></div></div>
       <div class="tf-signal ${sig ? (sig.dir==='buy'?'buy':'sell') : ''}">${sig ? `${sig.dir.toUpperCase()} ${fmt(sig.entry)}` : 'WAITING'}</div>
     </article>`;
   }).join('');
@@ -65,7 +65,8 @@ function render(data) {
   $('winrateByTf').innerHTML = tfs.map(tf => {
     const st = data.timeframes[tf].stats;
     const p = st.primary || { winrate:0, wins:0, losses:0 };
-    return `<article class="tf-wr-block"><div class="tf-wr-head"><h3>${tf}</h3><span>Overall ${Number(p.winrate).toFixed(1)}% • ${p.wins}W/${p.losses}L • ${st.total} trades • ${st.skipped} skipped</span></div><div class="wr-grid">${wrHtml(st)}</div></article>`;
+    const entries = st.confirmedEntries ?? st.total ?? 0;
+    return `<article class="tf-wr-block"><div class="tf-wr-head"><h3>${tf}</h3><span>Overall ${Number(p.winrate).toFixed(1)}% • ${p.wins}W/${p.losses}L • ${entries} entry • ${st.skipped} skipped</span></div><div class="wr-grid">${wrHtml(st)}</div></article>`;
   }).join('');
 
   const pending = tfs.flatMap(tf => data.timeframes[tf].pending.map(x => ({...x,timeframe:tf})));
