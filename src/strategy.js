@@ -2,7 +2,7 @@ const clone = (v) => JSON.parse(JSON.stringify(v));
 
 export const defaultConfig = {
   symbol: 'XAUUSD',
-  timeframe: 'M3',
+  timeframe: 'M1',
   atrPeriod: 14,
   displacementAtr: 1.5,
   pivotStrength: 4,
@@ -16,6 +16,10 @@ export const defaultConfig = {
 };
 
 const tr = (a, b) => Math.max(a.high - a.low, Math.abs(a.high - b.close), Math.abs(a.low - b.close));
+const normTime = (v) => {
+  const n = Number(v ?? Date.now());
+  return n < 1e12 ? n * 1000 : n;
+};
 
 function atr(candles, period) {
   if (candles.length < period + 1) return null;
@@ -24,11 +28,11 @@ function atr(candles, period) {
   return sum / period;
 }
 
-function entryFromFvg(dir, top, bottom, mode, touchPrice) {
+function plannedEntry(dir, top, bottom, mode) {
   if (mode === 'top') return top;
   if (mode === 'bottom') return bottom;
   if (mode === 'mid') return (top + bottom) / 2;
-  return touchPrice ?? (dir === 'buy' ? top : bottom);
+  return dir === 'buy' ? top : bottom;
 }
 
 function targets(dir, entry, sl, rr) {
@@ -53,13 +57,15 @@ export class StrategyEngine {
   }
 
   updateConfig(patch = {}) {
-    this.config = { ...this.config, ...patch };
+    const safePatch = { ...patch };
+    if (safePatch.rr && !Array.isArray(safePatch.rr)) delete safePatch.rr;
+    this.config = { ...this.config, ...safePatch };
     return clone(this.config);
   }
 
   ingest(candle) {
     const c = {
-      time: Number(candle.time ?? Date.now()),
+      time: normTime(candle.time),
       open: Number(candle.open), high: Number(candle.high), low: Number(candle.low), close: Number(candle.close),
       volume: Number(candle.volume ?? 0),
     };
@@ -83,15 +89,15 @@ export class StrategyEngine {
     const c = this.candles[i], p = this.candles[i - 1];
     const bullDisp = c.close > c.open && c.close - c.open >= a * this.config.displacementAtr;
     const bearDisp = c.close < c.open && c.open - c.close >= a * this.config.displacementAtr;
-    if (bullDisp && p.close < p.open) this.obs.push({ id:`ob-${i}-b`, dir:'buy', top:p.high, bottom:p.low, sl:p.low, born:i-1, fresh:true, paired:false });
-    if (bearDisp && p.close > p.open) this.obs.push({ id:`ob-${i}-s`, dir:'sell', top:p.high, bottom:p.low, sl:p.high, born:i-1, fresh:true, paired:false });
+    if (bullDisp && p.close < p.open) this.obs.push({ id:`ob-${i}-b`, dir:'buy', top:p.high, bottom:p.low, sl:p.low, born:i-1, bornTime:p.time, fresh:true, paired:false });
+    if (bearDisp && p.close > p.open) this.obs.push({ id:`ob-${i}-s`, dir:'sell', top:p.high, bottom:p.low, sl:p.high, born:i-1, bornTime:p.time, fresh:true, paired:false });
   }
 
   detectFvg(i) {
     if (i < 2) return;
     const c = this.candles[i], a = this.candles[i - 2];
-    if (c.low > a.high) this.fvgs.push({ id:`fvg-${i}-b`, dir:'buy', top:c.low, bottom:a.high, born:i, fresh:true });
-    if (c.high < a.low) this.fvgs.push({ id:`fvg-${i}-s`, dir:'sell', top:a.low, bottom:c.high, born:i, fresh:true });
+    if (c.low > a.high) this.fvgs.push({ id:`fvg-${i}-b`, dir:'buy', top:c.low, bottom:a.high, born:i, bornTime:c.time, fresh:true });
+    if (c.high < a.low) this.fvgs.push({ id:`fvg-${i}-s`, dir:'sell', top:a.low, bottom:c.high, born:i, bornTime:c.time, fresh:true });
   }
 
   refreshFreshness(i) {
@@ -115,7 +121,12 @@ export class StrategyEngine {
       if (!ob) continue;
       ob.paired = true;
       this.setups = this.setups.filter((s) => s.dir !== fvg.dir || s.status !== 'pending');
-      this.setups.push({ id:`setup-${i}-${fvg.dir}`, dir:fvg.dir, obId:ob.id, fvgId:fvg.id, fvgTop:fvg.top, fvgBottom:fvg.bottom, structuralSl:ob.sl, born:i, status:'pending' });
+      this.setups.push({
+        id:`setup-${i}-${fvg.dir}`, dir:fvg.dir, obId:ob.id, fvgId:fvg.id,
+        fvgTop:fvg.top, fvgBottom:fvg.bottom, structuralSl:ob.sl,
+        plannedEntry: plannedEntry(fvg.dir, fvg.top, fvg.bottom, this.config.fvgEntryMode),
+        born:i, bornTime:this.candles[i].time, status:'pending'
+      });
     }
   }
 
@@ -124,15 +135,27 @@ export class StrategyEngine {
     for (const s of this.setups) {
       if (s.status !== 'pending' || i <= s.born) continue;
       if (i - s.born > this.config.setupExpiryBars) { s.status = 'expired'; continue; }
-      const touched = c.high >= s.fvgBottom && c.low <= s.fvgTop;
-      if (!touched) continue;
-      const touch = s.dir === 'buy' ? s.fvgTop : s.fvgBottom;
-      const entry = entryFromFvg(s.dir, s.fvgTop, s.fvgBottom, this.config.fvgEntryMode, touch);
+
+      const entry = plannedEntry(s.dir, s.fvgTop, s.fvgBottom, this.config.fvgEntryMode);
+      s.plannedEntry = entry;
+      const entryTouched = c.high >= entry && c.low <= entry;
+      if (!entryTouched) continue;
+
       const sl = s.structuralSl;
       const slPips = Math.abs(entry - sl) / this.config.pipSize;
-      if (slPips > this.config.maxSwingSlPips) { s.status = 'skipped'; this.skipped++; continue; }
+      if (slPips > this.config.maxSwingSlPips) {
+        s.status = 'skipped';
+        s.skipReason = `Swing SL ${slPips.toFixed(1)} pips > ${this.config.maxSwingSlPips}`;
+        this.skipped++;
+        continue;
+      }
+
       const tps = targets(s.dir, entry, sl, this.config.rr);
-      const trade = { id:`trade-${i}-${s.dir}`, setupId:s.id, dir:s.dir, entry, sl, slPips, tps, opened:i, status:'live', tpHits:[false,false,false,false], result:null };
+      const trade = {
+        id:`trade-${this.config.timeframe}-${i}-${s.dir}`, setupId:s.id, timeframe:this.config.timeframe,
+        dir:s.dir, entry, sl, slPips, tps, opened:i, openedTime:c.time,
+        status:'live', tpHits:[false,false,false,false], result:null
+      };
       this.trades.push(trade);
       s.status = 'filled';
       this.lastSignal = { ...trade, symbol:this.config.symbol, timeframe:this.config.timeframe, time:c.time };
@@ -144,28 +167,35 @@ export class StrategyEngine {
     for (const t of this.trades) {
       if (t.status !== 'live') continue;
       const slHit = t.dir === 'buy' ? c.low <= t.sl : c.high >= t.sl;
-      if (slHit) { t.status = 'closed'; t.result = 'SL'; t.closed = i; continue; }
-      t.tps.forEach((tp, n) => { if (!t.tpHits[n] && (t.dir === 'buy' ? c.high >= tp : c.low <= tp)) t.tpHits[n] = true; });
-      if (t.tpHits[3]) { t.status = 'closed'; t.result = 'TP4'; t.closed = i; }
+      if (slHit) {
+        t.status = 'closed'; t.result = 'SL'; t.closed = i; t.closedTime = c.time;
+        continue;
+      }
+      t.tps.forEach((tp, n) => {
+        if (!t.tpHits[n] && (t.dir === 'buy' ? c.high >= tp : c.low <= tp)) t.tpHits[n] = true;
+      });
+      if (t.tpHits[3]) {
+        t.status = 'closed'; t.result = 'TP4'; t.closed = i; t.closedTime = c.time;
+      }
     }
     this.trades = this.trades.slice(-500);
   }
 
   stats() {
-    const closedOrLive = this.trades;
-    const total = closedOrLive.length;
+    const all = this.trades;
     const wr = [0,1,2,3].map((n) => {
-      const resolved = closedOrLive.filter((t) => t.status === 'closed' || t.tpHits[n]);
+      const resolved = all.filter((t) => t.status === 'closed' || t.tpHits[n]);
       const wins = resolved.filter((t) => t.tpHits[n]).length;
-      return { target:n+1, wins, resolved:resolved.length, winrate:resolved.length ? +(wins/resolved.length*100).toFixed(1) : 0 };
+      return { target:n+1, wins, losses:resolved.length-wins, resolved:resolved.length, winrate:resolved.length ? +(wins/resolved.length*100).toFixed(1) : 0 };
     });
-    return { total, skipped:this.skipped, winrates:wr };
+    return { total:all.length, live:all.filter(t => t.status === 'live').length, skipped:this.skipped, winrates:wr };
   }
 
   snapshot() {
     return {
       config: clone(this.config),
       price: this.candles.at(-1)?.close ?? null,
+      lastCandleTime: this.candles.at(-1)?.time ?? null,
       freshOB: this.obs.filter((x) => x.fresh),
       freshFVG: this.fvgs.filter((x) => x.fresh),
       pending: this.setups.filter((x) => x.status === 'pending'),
