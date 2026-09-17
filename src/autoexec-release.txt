@@ -1,0 +1,4 @@
+MT5 Auto Execution V1 release marker
+Web AI strategy unchanged
+MT5 management: TP1 + 5 pips -> move SL to TP1
+AUTO_TRADE remains disabled by default
