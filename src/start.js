@@ -42,11 +42,22 @@ if (!source.includes('TELEGRAM_GROUP_CHAT_ID')) throw new Error('Telegram group 
 if (source.includes(oldSend)) source = source.replace(oldSend, dualSend);
 else if (!source.includes('destinations=${targets.length}')) throw new Error('Telegram dual-send patch marker not found');
 
-// MT5 Auto Execution V1 is an isolated execution layer. It never mutates StrategyEngine,
-// Web AI history, winrate or P/L. Disabled by default until AUTO_TRADE=true on Railway.
+// MT5 Auto Execution is isolated from Web AI strategy/statistics.
 const autoExecPrelude = `
 const AUTO_TRADE=String(process.env.AUTO_TRADE||'false').toLowerCase()==='true';
 const mt5Exec={queue:[],seen:new Set(),acked:new Map(),lastPoll:null,lastAck:null};
+async function sendMt5Private(text,meta={}){
+  if(!TELEGRAM_BOT_TOKEN||!TELEGRAM_CHAT_ID)return false;
+  const started=Date.now();
+  try{
+    const resp=await fetch(\`https://api.telegram.org/bot\${TELEGRAM_BOT_TOKEN}/sendMessage\`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:TELEGRAM_CHAT_ID,text,disable_web_page_preview:true})});
+    const apiMs=Date.now()-started;
+    if(!resp.ok){console.error('Telegram PRIVATE MT5 send failed:',resp.status,await resp.text());return false;}
+    Object.assign(telegramMetrics,{lastSentAt:Date.now(),lastApiMs:apiMs,lastEvent:meta.event||'MT5_EXECUTION',lastTimeframe:meta.tf||null});
+    console.log(\`Telegram destination=PRIVATE delivered event=\${telegramMetrics.lastEvent} tf=\${telegramMetrics.lastTimeframe||'-'} apiMs=\${apiMs}\`);
+    return true;
+  }catch(e){console.error('Telegram PRIVATE MT5 error:',e.message);return false;}
+}
 function enqueueMt5Order(tf,t){
   if(!AUTO_TRADE||!t||mt5Exec.seen.has(t.id))return;
   mt5Exec.seen.add(t.id);
@@ -64,7 +75,7 @@ else if(!source.includes('enqueueMt5Order(tf,t)')) throw new Error('MT5 auto exe
 
 const autoExecRoutes=`
 app.get('/api/mt5/commands',(q,r)=>{if(!requireBridge(q,r))return;mt5Exec.lastPoll=Date.now();if(!AUTO_TRADE)return r.json({ok:true,autoTrade:false,commands:[]});r.json({ok:true,autoTrade:true,commands:mt5Exec.queue.slice(0,10)});});
-app.post('/api/mt5/commands/ack',(q,r)=>{if(!requireBridge(q,r))return;const b=q.body||{},id=String(b.id||'');if(!id)return r.status(400).json({ok:false,error:'id required'});const idx=mt5Exec.queue.findIndex(x=>x.id===id);const cmd=idx>=0?mt5Exec.queue[idx]:null;if(idx>=0)mt5Exec.queue.splice(idx,1);mt5Exec.acked.set(id,{...b,ackedAt:Date.now()});if(mt5Exec.acked.size>500)mt5Exec.acked.delete(mt5Exec.acked.keys().next().value);mt5Exec.lastAck=Date.now();const status=String(b.status||'UNKNOWN').toUpperCase(),ticket=String(b.ticket||'-'),detail=String(b.detail||'-');console.log(\`MT5 execution ack id=\${id} status=\${status} ticket=\${ticket}\`);const tf=cmd?.timeframe||'-',side=cmd?.side||'-';if(status==='EXECUTED'){const text=\`✅ MT5 EXECUTED\\nSymbol: \${cmd?.symbol||'XAUUSD'}\\nTF: \${tf}\\nSide: \${side}\\nTicket: \${ticket}\\nEntry AI: \${cmd?.entry??'-'}\\nSL: \${cmd?.sl??'-'}\\nTP1: \${cmd?.tp1??'-'}\\nTP4: \${cmd?.tp4??'-'}\\nManagement: TP1 + 5 pips → SL ke TP1\\nSignal ID: \${id}\`;void sendTelegram(text,{event:'MT5_EXECUTED',tf});}else if(status==='FAILED'||status==='REJECTED'){const text=\`❌ MT5 \${status}\\nSymbol: \${cmd?.symbol||'XAUUSD'}\\nTF: \${tf}\\nSide: \${side}\\nTicket: \${ticket}\\nReason: \${detail}\\nSignal ID: \${id}\`;void sendTelegram(text,{event:'MT5_'+status,tf});}r.json({ok:true});});
+app.post('/api/mt5/commands/ack',(q,r)=>{if(!requireBridge(q,r))return;const b=q.body||{},id=String(b.id||'');if(!id)return r.status(400).json({ok:false,error:'id required'});const idx=mt5Exec.queue.findIndex(x=>x.id===id);const cmd=idx>=0?mt5Exec.queue[idx]:null;if(idx>=0)mt5Exec.queue.splice(idx,1);mt5Exec.acked.set(id,{...b,ackedAt:Date.now()});if(mt5Exec.acked.size>500)mt5Exec.acked.delete(mt5Exec.acked.keys().next().value);mt5Exec.lastAck=Date.now();const status=String(b.status||'UNKNOWN').toUpperCase(),ticket=String(b.ticket||'-'),detail=String(b.detail||'-');console.log(\`MT5 execution ack id=\${id} status=\${status} ticket=\${ticket}\`);const tf=cmd?.timeframe||'-',side=cmd?.side||'-';if(status==='EXECUTED'){const text=\`✅ MT5 EXECUTED\\nSymbol: \${cmd?.symbol||'XAUUSD'}\\nTF: \${tf}\\nSide: \${side}\\nTicket: \${ticket}\\nEntry AI: \${cmd?.entry??'-'}\\nSL: \${cmd?.sl??'-'}\\nTP1: \${cmd?.tp1??'-'}\\nTP4: \${cmd?.tp4??'-'}\\nManagement: TP1 + 5 pips → SL ke TP1\\nSignal ID: \${id}\`;void sendMt5Private(text,{event:'MT5_EXECUTED',tf});}else if(status==='FAILED'||status==='REJECTED'){const text=\`❌ MT5 \${status}\\nSymbol: \${cmd?.symbol||'XAUUSD'}\\nTF: \${tf}\\nSide: \${side}\\nTicket: \${ticket}\\nReason: \${detail}\\nSignal ID: \${id}\`;void sendMt5Private(text,{event:'MT5_'+status,tf});}r.json({ok:true});});
 app.get('/api/mt5/auto-status',(q,r)=>{if(!requireBridge(q,r))return;r.json({ok:true,autoTrade:AUTO_TRADE,queued:mt5Exec.queue.length,acked:mt5Exec.acked.size,lastPoll:mt5Exec.lastPoll,lastAck:mt5Exec.lastAck,management:'MT5 only: TP1 + 5 pips => SL moves to TP1'});});
 `;
 if(!source.includes("app.get('/api/mt5/commands'")) source=source.replace("app.get('/api/health'",autoExecRoutes+"\napp.get('/api/health'");
