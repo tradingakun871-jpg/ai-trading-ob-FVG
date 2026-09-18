@@ -122,3 +122,11 @@ export async function getHistoricalEntries({timeframe=null,limit=500}={}) {
   return rows.map(historyRow);
 }
 export const databaseEnabled=()=>Boolean(pool);
+
+export async function getSessionReport(startMs,endMs) {
+  if (!pool) return null;
+  const start=Number(startMs), end=Number(endMs);
+  if(!Number.isFinite(start)||!Number.isFinite(end)||end<=start) throw new Error('invalid session range');
+  const {rows}=await pool.query(`SELECT * FROM (${DEDUPED_TRADES_SQL}) d WHERE opened_time >= $1 AND opened_time < $2 ORDER BY opened_time ASC`,[start,end]);
+  return {start,end,timezone:'Asia/Jakarta',summary:summarize(rows),timeframes:Object.fromEntries(ACTIVE_TFS.map(tf=>[tf,summarize(rows.filter(r=>r.timeframe===tf))])),trades:rows.map(historyRow)};
+}
