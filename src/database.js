@@ -18,6 +18,11 @@ export async function initDatabase() {
   await pool.query('CREATE INDEX IF NOT EXISTS idx_trading_setups_opened ON trading_setups(opened_time)');
   await pool.query('CREATE INDEX IF NOT EXISTS idx_trading_setups_tf ON trading_setups(timeframe)');
   await pool.query('CREATE INDEX IF NOT EXISTS idx_trading_setups_outcome ON trading_setups(outcome)');
+  await pool.query('ALTER TABLE trading_setups ADD COLUMN IF NOT EXISTS quality_grade TEXT');
+  await pool.query('ALTER TABLE trading_setups ADD COLUMN IF NOT EXISTS quality_score INTEGER');
+  await pool.query('ALTER TABLE trading_setups ADD COLUMN IF NOT EXISTS market_regime TEXT');
+  await pool.query('ALTER TABLE trading_setups ADD COLUMN IF NOT EXISTS regime_aligned BOOLEAN');
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_trading_setups_quality ON trading_setups(quality_grade,quality_score)');
   const deleted = await pool.query("DELETE FROM trading_setups WHERE timeframe = 'M5'");
   console.log(`M5 historical cleanup: deleted ${deleted.rowCount} rows`);
   return true;
@@ -57,8 +62,8 @@ export async function syncEngineToDatabase(tf, engine) {
     const pnlPips=pnlFromHits(tpHits,riskPips,closedLoss);
     const id=stableRowId(tf,x);
     await pool.query(`INSERT INTO trading_setups
-      (id,timeframe,symbol,direction,status,setup_time,opened_time,closed_time,entry,structural_sl,sl,sl_pips,tp1,tp2,tp3,tp4,tp1_hit,tp2_hit,tp3_hit,tp4_hit,outcome,pnl_pips,skip_reason,payload,updated_at)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,NOW())
+      (id,timeframe,symbol,direction,status,setup_time,opened_time,closed_time,entry,structural_sl,sl,sl_pips,tp1,tp2,tp3,tp4,tp1_hit,tp2_hit,tp3_hit,tp4_hit,outcome,pnl_pips,skip_reason,payload,quality_grade,quality_score,market_regime,regime_aligned,updated_at)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,NOW())
       ON CONFLICT(id) DO UPDATE SET
       symbol=EXCLUDED.symbol,direction=EXCLUDED.direction,status=EXCLUDED.status,setup_time=EXCLUDED.setup_time,
       opened_time=LEAST(trading_setups.opened_time,EXCLUDED.opened_time),closed_time=EXCLUDED.closed_time,entry=EXCLUDED.entry,
@@ -72,8 +77,8 @@ export async function syncEngineToDatabase(tf, engine) {
         WHEN (trading_setups.tp2_hit OR EXCLUDED.tp2_hit) THEN 2*ABS(COALESCE(EXCLUDED.sl_pips,trading_setups.sl_pips,0))
         WHEN (trading_setups.tp1_hit OR EXCLUDED.tp1_hit) THEN ABS(COALESCE(EXCLUDED.sl_pips,trading_setups.sl_pips,0))
         ELSE COALESCE(EXCLUDED.pnl_pips,trading_setups.pnl_pips) END,
-      skip_reason=EXCLUDED.skip_reason,payload=EXCLUDED.payload,updated_at=NOW()`,
-      [id,tf,symbol,x.dir,x.status,n(x.bornTime??x.time),n(x.openedTime),n(x.closedTime),entry,n(x.structuralSl),sl,riskPips,n(x.tps?.[0]),n(x.tps?.[1]),n(x.tps?.[2]),n(x.tps?.[3]),!!tpHits[0],!!tpHits[1],!!tpHits[2],!!tpHits[3],won?'WIN':closedLoss?'LOSS':null,pnlPips,x.skipReason||null,JSON.stringify(x)]);
+      skip_reason=EXCLUDED.skip_reason,payload=EXCLUDED.payload,quality_grade=EXCLUDED.quality_grade,quality_score=EXCLUDED.quality_score,market_regime=EXCLUDED.market_regime,regime_aligned=EXCLUDED.regime_aligned,updated_at=NOW()`,
+      [id,tf,symbol,x.dir,x.status,n(x.bornTime??x.time),n(x.openedTime),n(x.closedTime),entry,n(x.structuralSl),sl,riskPips,n(x.tps?.[0]),n(x.tps?.[1]),n(x.tps?.[2]),n(x.tps?.[3]),!!tpHits[0],!!tpHits[1],!!tpHits[2],!!tpHits[3],won?'WIN':closedLoss?'LOSS':null,pnlPips,x.skipReason||null,JSON.stringify(x),x.quality?.grade||null,n(x.quality?.score),x.quality?.regime||null,x.quality?.regimeAligned??null]);
   }
   return true;
 }
@@ -138,6 +143,17 @@ export async function getWeeklyDecisionAnalysis(nowMs=Date.now()) {
     tpHits,days:group(dayKey),hours:byHour,bestHour:rankedHours[0]?{hour:rankedHours[0][0],...rankedHours[0][1]}:null,worstHour:rankedHours.length?{hour:rankedHours[rankedHours.length-1][0],...rankedHours[rankedHours.length-1][1]}:null,
     decision:{status:total.resolved<10?'INSUFFICIENT_SAMPLE':total.netPips>0?'POSITIVE_WEEK':total.netPips<0?'NEGATIVE_WEEK':'FLAT_WEEK',sampleSize:total.resolved,note:'Decision status is descriptive only; use timeframe, direction, hour and TP/SL breakdown to review strategy rules.'},
     database:true,deduplicated:true};
+}
+
+export async function getQualityGatePerformance(nowMs=Date.now()) {
+  if (!pool) return null;
+  const {weekStart}=jakartaPeriodStarts(nowMs);
+  const {rows}=await pool.query(`SELECT * FROM (${DEDUPED_TRADES_SQL}) d WHERE opened_time >= $1 AND opened_time <= $2 AND quality_grade IS NOT NULL ORDER BY opened_time ASC`,[weekStart,Number(nowMs)]);
+  const byGrade=Object.fromEntries(['A','B','C'].map(g=>[g,summarize(rows.filter(r=>r.quality_grade===g))]));
+  const byRegime=Object.fromEntries(['bullish','bearish','neutral','unknown'].map(g=>[g,summarize(rows.filter(r=>(r.market_regime||'unknown')===g))]));
+  const aligned={aligned:summarize(rows.filter(r=>r.regime_aligned===true)),counter:summarize(rows.filter(r=>r.regime_aligned===false))};
+  const gradeDirection=Object.fromEntries(['A','B','C'].map(g=>[g,{BUY:summarize(rows.filter(r=>r.quality_grade===g&&String(r.direction).toLowerCase()==='buy')),SELL:summarize(rows.filter(r=>r.quality_grade===g&&String(r.direction).toLowerCase()==='sell'))}]));
+  return {timezone:'Asia/Jakarta',period:{start:weekStart,end:Number(nowMs)},mode:'SHADOW',sample:summarize(rows),grades:byGrade,regimes:byRegime,regimeAlignment:aligned,gradeDirection,database:true,note:'Shadow analytics only. Quality grades do not block live execution.'};
 }
 
 export const databaseEnabled=()=>Boolean(pool);
