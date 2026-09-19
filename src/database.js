@@ -121,6 +121,25 @@ export async function getHistoricalEntries({timeframe=null,limit=500}={}) {
   const {rows}=await pool.query(`SELECT * FROM (${DEDUPED_TRADES_SQL}) d WHERE ${where} ORDER BY opened_time DESC LIMIT $${params.length}`,params);
   return rows.map(historyRow);
 }
+export async function getWeeklyDecisionAnalysis(nowMs=Date.now()) {
+  if (!pool) return null;
+  const {weekStart}=jakartaPeriodStarts(nowMs);
+  const {rows}=await pool.query(`SELECT * FROM (${DEDUPED_TRADES_SQL}) d WHERE opened_time >= $1 AND opened_time <= $2 ORDER BY opened_time ASC`,[weekStart,Number(nowMs)]);
+  const resolved=rows.filter(r=>r.outcome==='WIN'||r.outcome==='LOSS');
+  const group=(keyFn)=>Object.fromEntries([...new Set(rows.map(keyFn))].filter(v=>v!=null).map(k=>[k,summarize(rows.filter(r=>keyFn(r)===k))]));
+  const dayKey=r=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Jakarta',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(Number(r.opened_time)));
+  const hourKey=r=>String(new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Jakarta',hour:'2-digit',hourCycle:'h23'}).format(new Date(Number(r.opened_time)))).padStart(2,'0')+':00';
+  const byHour=group(hourKey), rankedHours=Object.entries(byHour).filter(([,x])=>x.resolved>0).sort((a,b)=>b[1].netPips-a[1].netPips);
+  const tpHits={tp1:rows.filter(r=>r.tp1_hit).length,tp2:rows.filter(r=>r.tp2_hit).length,tp3:rows.filter(r=>r.tp3_hit).length,tp4:rows.filter(r=>r.tp4_hit).length,sl:rows.filter(r=>r.outcome==='LOSS').length};
+  const total=summarize(rows), avgWin=total.wins?total.grossProfitPips/total.wins:0, avgLoss=total.losses?total.grossLossPips/total.losses:0;
+  return {timezone:'Asia/Jakarta',period:{start:weekStart,end:Number(nowMs)},summary:{...total,expectancyPips:total.resolved?round1(total.netPips/total.resolved):0,avgWinPips:round1(avgWin),avgLossPips:round1(avgLoss)},
+    timeframes:Object.fromEntries(ACTIVE_TFS.map(tf=>[tf,summarize(rows.filter(r=>r.timeframe===tf))])),
+    directions:{BUY:summarize(rows.filter(r=>String(r.direction).toLowerCase()==='buy')),SELL:summarize(rows.filter(r=>String(r.direction).toLowerCase()==='sell'))},
+    tpHits,days:group(dayKey),hours:byHour,bestHour:rankedHours[0]?{hour:rankedHours[0][0],...rankedHours[0][1]}:null,worstHour:rankedHours.length?{hour:rankedHours[rankedHours.length-1][0],...rankedHours[rankedHours.length-1][1]}:null,
+    decision:{status:total.resolved<10?'INSUFFICIENT_SAMPLE':total.netPips>0?'POSITIVE_WEEK':total.netPips<0?'NEGATIVE_WEEK':'FLAT_WEEK',sampleSize:total.resolved,note:'Decision status is descriptive only; use timeframe, direction, hour and TP/SL breakdown to review strategy rules.'},
+    database:true,deduplicated:true};
+}
+
 export const databaseEnabled=()=>Boolean(pool);
 
 export async function getSessionReport(startMs,endMs) {
