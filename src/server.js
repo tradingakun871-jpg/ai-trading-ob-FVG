@@ -2,7 +2,7 @@ import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { StrategyEngine, defaultConfig } from './strategy.js';
-import { initDatabase, syncEngineToDatabase, getPerformance, getHistoricalEntries, getSessionReport, getWeeklyDecisionAnalysis, databaseEnabled } from './database.js';
+import { initDatabase, syncEngineToDatabase, getPerformance, getHistoricalEntries, getSessionReport, getWeeklyDecisionAnalysis, getQualityGatePerformance, databaseEnabled } from './database.js';
 
 const __dirname=path.dirname(fileURLToPath(import.meta.url));
 const app=express(), port=process.env.PORT||3000;
@@ -59,7 +59,7 @@ setInterval(()=>{const j=wibParts();if(j.hour===4&&!sessionReport.pending){sessi
 console.log('Broker-session Telegram report active: lock 04:00 WIB, send on first MT5 tick at/after 05:00 WIB');
 app.get('/api/health',(_q,r)=>r.json({ok:true,service:'ai-trading-ob-fvg-mtf',timeframes:TFS,hybridRealtime:true,mt5Connected:mt5Connected(),telegramConfigured:telegramReady(),databaseConfigured:databaseEnabled(),databaseReady:dbReady,time:new Date().toISOString()}));
 app.get('/api/status',(_q,r)=>r.json(combinedSnapshot()));app.get('/api/integrations',(_q,r)=>r.json(combinedSnapshot().integrations));
-app.get('/api/performance',async(_q,r)=>{try{if(!dbReady)return r.status(503).json({error:'database not ready'});r.json(await getPerformance())}catch(e){r.status(500).json({error:e.message})}});app.get('/api/analytics/weekly',async(_q,r)=>{try{if(!dbReady)return r.status(503).json({error:'database not ready'});r.json(await getWeeklyDecisionAnalysis())}catch(e){r.status(500).json({error:e.message})}});
+app.get('/api/performance',async(_q,r)=>{try{if(!dbReady)return r.status(503).json({error:'database not ready'});r.json(await getPerformance())}catch(e){r.status(500).json({error:e.message})}});app.get('/api/analytics/weekly',async(_q,r)=>{try{if(!dbReady)return r.status(503).json({error:'database not ready'});r.json(await getWeeklyDecisionAnalysis())}catch(e){r.status(500).json({error:e.message})}});app.get('/api/analytics/quality-gate',async(_q,r)=>{try{if(!dbReady)return r.status(503).json({error:'database not ready'});r.json(await getQualityGatePerformance())}catch(e){r.status(500).json({error:e.message})}});
 app.get('/api/history',async(q,r)=>{try{if(!dbReady)return r.status(503).json({error:'database not ready'});const tf=q.query.timeframe?normTf(q.query.timeframe):null;r.json({history:await getHistoricalEntries({timeframe:tf,limit:q.query.limit||500}),database:true})}catch(e){r.status(400).json({error:e.message})}});
 app.get('/api/status/:tf',(q,r)=>{try{r.json(engines[normTf(q.params.tf)].snapshot())}catch(e){r.status(400).json({error:e.message})}});
 app.get('/api/config',(_q,r)=>r.json({shared:{...engines.M1.config,timeframe:undefined},timeframes:Object.fromEntries(TFS.map(tf=>[tf,engines[tf].config]))}));
