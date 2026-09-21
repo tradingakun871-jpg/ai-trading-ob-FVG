@@ -22,5 +22,5 @@ async function notifyAiMarketChanges(result){const intradayBias=String(result?.i
 source=source.slice(0,a)+replacement+source.slice(b);
 fs.writeFileSync(serverPath,source,'utf8');
 
-console.log('AI Market Telegram filter active: notify only OpenAI BEST ENTRY or market-direction change; routine level/SL/TP/confidence changes stay silent');
+console.log('Telegram VALIDATED SIGNAL ONLY active: AI Market plans/direction stay silent; only strategy/execution lifecycle notifications remain');
 await import('./boot.js');
