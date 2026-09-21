@@ -112,17 +112,20 @@ ulong FindLimitOrder(string tf,string setupId)
    return 0;
 }
 
-void SaveLimitManagement(ulong orderTicket,double entry,double tp1,double trigger)
+void SaveLimitManagement(ulong orderTicket,double entry,double tp1,double tp2,double tp3,double tp4,double p1,double p2,double p3,double p4,double trigger)
 {
    GlobalVariableSet(GKey(orderTicket,"ENTRY"),entry);
-   GlobalVariableSet(GKey(orderTicket,"TP1"),tp1);
+   GlobalVariableSet(GKey(orderTicket,"TP1"),tp1); GlobalVariableSet(GKey(orderTicket,"TP2"),tp2);
+   GlobalVariableSet(GKey(orderTicket,"TP3"),tp3); GlobalVariableSet(GKey(orderTicket,"TP4"),tp4);
+   GlobalVariableSet(GKey(orderTicket,"P1"),p1); GlobalVariableSet(GKey(orderTicket,"P2"),p2);
+   GlobalVariableSet(GKey(orderTicket,"P3"),p3); GlobalVariableSet(GKey(orderTicket,"P4"),p4);
    GlobalVariableSet(GKey(orderTicket,"TRG"),trigger);
 }
 
 void HandlePlaceLimit(string obj)
 {
    string id=JsonValue(obj,"id"),setupId=JsonValue(obj,"setupId"),tf=JsonValue(obj,"timeframe"),symbol=JsonValue(obj,"symbol"),side=JsonValue(obj,"side");
-   double entry=JsonNum(obj,"entry"),sl=JsonNum(obj,"sl"),tp1=JsonNum(obj,"tp1"),tp4=JsonNum(obj,"tp4"),pip=JsonNum(obj,"pipSize"),buffer=JsonNum(obj,"slMoveTriggerPips");
+   double entry=JsonNum(obj,"entry"),sl=JsonNum(obj,"sl"),tp1=JsonNum(obj,"tp1"),tp2=JsonNum(obj,"tp2"),tp3=JsonNum(obj,"tp3"),tp4=JsonNum(obj,"tp4"),p1=JsonNum(obj,"tp1Probability"),p2=JsonNum(obj,"tp2Probability"),p3=JsonNum(obj,"tp3Probability"),p4=JsonNum(obj,"tp4Probability"),pip=JsonNum(obj,"pipSize"),buffer=JsonNum(obj,"slMoveTriggerPips");
    if(id==""||setupId==""||tf==""||symbol==""||(side!="BUY"&&side!="SELL")||entry<=0||sl<=0||tp1<=0||tp4<=0){AckEx(id,"REJECTED",0,"invalid limit command",setupId,tf,side,entry,0);return;}
    if(symbol!=g_symbol){AckEx(id,"REJECTED",0,"symbol mismatch",setupId,tf,side,entry,0);return;}
 
@@ -141,7 +144,7 @@ void HandlePlaceLimit(string obj)
 
    ulong orderTicket=trade.ResultOrder();
    double trigger=(side=="BUY")?tp1+buffer*pip:tp1-buffer*pip;
-   SaveLimitManagement(orderTicket,entry,tp1,trigger);
+   SaveLimitManagement(orderTicket,entry,tp1,tp2,tp3,tp4,p1,p2,p3,p4,trigger);
    Print("[LIMIT] PLACED id=",id," ticket=",orderTicket," side=",side," entry=",Num(entry)," SL=",Num(sl)," TP4=",Num(tp4));
    AckEx(id,"PLACED",orderTicket,"broker pending LIMIT armed",setupId,tf,side,entry,0);
 }
@@ -181,19 +184,25 @@ void PollCommands()
 void ManagePositions()
 {
    if(!EnableAutoExecution)return;MqlTick tick;if(!SymbolInfoTick(g_symbol,tick))return;
+   MqlRates closed[];ArraySetAsSeries(closed,true);bool hasClosed=(CopyRates(g_symbol,PERIOD_M1,1,1,closed)==1);
    for(int i=PositionsTotal()-1;i>=0;i--)
    {
       ulong ticket=PositionGetTicket(i);if(ticket==0)continue;
       if(PositionGetInteger(POSITION_MAGIC)!=(long)MagicNumber)continue;
       if(PositionGetString(POSITION_SYMBOL)!=g_symbol)continue;
       string ktp=GKey(ticket,"TP1"),ktr=GKey(ticket,"TRG");if(!GlobalVariableCheck(ktp)||!GlobalVariableCheck(ktr))continue;
-      double tp1=GlobalVariableGet(ktp),trigger=GlobalVariableGet(ktr),sl=PositionGetDouble(POSITION_SL),tp=PositionGetDouble(POSITION_TP);long type=PositionGetInteger(POSITION_TYPE);
-      bool reached=(type==POSITION_TYPE_BUY)?tick.bid>=trigger:tick.ask<=trigger;
-      bool moved=(type==POSITION_TYPE_BUY)?sl>=tp1:(sl>0&&sl<=tp1);
-      if(reached&&!moved)
+      double levels[4],probs[4]; levels[0]=GlobalVariableGet(GKey(ticket,"TP1")); levels[1]=GlobalVariableGet(GKey(ticket,"TP2")); levels[2]=GlobalVariableGet(GKey(ticket,"TP3")); levels[3]=GlobalVariableGet(GKey(ticket,"TP4"));
+      probs[0]=GlobalVariableGet(GKey(ticket,"P1")); probs[1]=GlobalVariableGet(GKey(ticket,"P2")); probs[2]=GlobalVariableGet(GKey(ticket,"P3")); probs[3]=GlobalVariableGet(GKey(ticket,"P4"));
+      double tp1=levels[0],trigger=GlobalVariableGet(ktr),sl=PositionGetDouble(POSITION_SL),tp=PositionGetDouble(POSITION_TP);long type=PositionGetInteger(POSITION_TYPE);
+      double desired=sl;int lockLevel=0;
+      if(hasClosed)for(int n=0;n<4;n++){if(probs[n]<=80.0||levels[n]<=0)continue;bool closedBeyond=(type==POSITION_TYPE_BUY)?closed[0].close>=levels[n]:closed[0].close<=levels[n];if(closedBeyond){desired=levels[n];lockLevel=n+1;}}
+      bool legacyReached=(type==POSITION_TYPE_BUY)?tick.bid>=trigger:tick.ask<=trigger;
+      if(lockLevel==0&&legacyReached){desired=tp1;lockLevel=1;}
+      bool improves=(type==POSITION_TYPE_BUY)?desired>sl:(desired>0&&(sl<=0||desired<sl));
+      if(lockLevel>0&&improves)
       {
          trade.SetExpertMagicNumber(MagicNumber);
-         if(trade.PositionModify(ticket,tp1,tp))Print("[AUTO] SL MOVED ticket=",ticket," -> TP1 ",Num(tp1));
+         if(trade.PositionModify(ticket,desired,tp))Print("[AUTO] PROFIT LOCK ticket=",ticket," -> TP",lockLevel," ",Num(desired)," probability=",DoubleToString(probs[lockLevel-1],0),"% candleClose=",hasClosed?Num(closed[0].close):"-");
          else Print("[AUTO] SL MOVE FAILED ticket=",ticket," ",trade.ResultRetcodeDescription());
       }
    }
@@ -225,7 +234,10 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,const MqlTradeRequest &
       if((ulong)PositionGetInteger(POSITION_IDENTIFIER)==positionId){positionTicket=t;break;}
    }
    if(positionTicket==0)positionTicket=positionId;
-   if(positionTicket>0&&tp1>0&&trigger>0){GlobalVariableSet(GKey(positionTicket,"TP1"),tp1);GlobalVariableSet(GKey(positionTicket,"TRG"),trigger);}
+   if(positionTicket>0&&tp1>0&&trigger>0){
+      string keys[9]={"TP1","TP2","TP3","TP4","P1","P2","P3","P4","TRG"};
+      for(int k=0;k<9;k++)if(GlobalVariableCheck(GKey(orderTicket,keys[k])))GlobalVariableSet(GKey(positionTicket,keys[k]),GlobalVariableGet(GKey(orderTicket,keys[k])));
+   }
 
    Print("[LIMIT] FILLED setup=",setupId," position=",positionTicket," planned=",Num(plannedEntry)," fill=",Num(fillPrice));
    AckEx("fill-"+tf+"-"+setupId,"EXECUTED",positionTicket,"broker LIMIT filled",setupId,tf,side,plannedEntry,fillPrice);
