@@ -2,7 +2,7 @@ import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { StrategyEngine, defaultConfig } from './strategy.js';
-import { initDatabase, syncEngineToDatabase, getPerformance, getHistoricalEntries, getSessionReport, getWeeklyDecisionAnalysis, getQualityGatePerformance, saveAiMarketPlans, updateAiMarketPlans, getAiMarketPerformance, databaseEnabled } from './database.js';
+import { initDatabase, syncEngineToDatabase, getPerformance, getHistoricalEntries, getSessionReport, getWeeklyDecisionAnalysis, getQualityGatePerformance, saveAiMarketPlans, updateAiMarketPlans, getAiMarketPerformance, saveMt5ExecutionCommand, updateMt5ExecutionCommand, getRecoverableMt5Commands, getMt5ExecutionAudit, databaseEnabled } from './database.js';
 
 const __dirname=path.dirname(fileURLToPath(import.meta.url));
 const app=express(), port=process.env.PORT||3000;
