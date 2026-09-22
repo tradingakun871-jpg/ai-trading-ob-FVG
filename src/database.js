@@ -33,6 +33,26 @@ export async function initDatabase() {
   await pool.query('CREATE INDEX IF NOT EXISTS idx_mt5_execution_status ON mt5_execution_queue(status,created_at)');
   const deleted = await pool.query("DELETE FROM trading_setups WHERE timeframe = 'M5'");
   console.log(`M5 historical cleanup: deleted ${deleted.rowCount} rows`);
+  // Existing reconstructed BACKFILL trades can have a different replay timestamp from
+  // their original LIVE trade. Remove only an exact price-identity twin; never delete LIVE.
+  const reconciled = await pool.query(`
+    DELETE FROM trading_setups b
+    WHERE b.opened_time IS NOT NULL
+      AND b.id LIKE '%:trade:%'
+      AND b.timeframe IN ('M1','M3')
+      AND UPPER(COALESCE(b.payload->>'source',''))='BACKFILL'
+      AND EXISTS (
+        SELECT 1 FROM trading_setups l
+        WHERE l.opened_time IS NOT NULL
+          AND l.id LIKE '%:trade:%'
+          AND l.timeframe=b.timeframe
+          AND l.direction=b.direction
+          AND ABS(COALESCE(l.entry,0)-COALESCE(b.entry,0)) < 0.00001
+          AND ABS(COALESCE(l.sl,0)-COALESCE(b.sl,0)) < 0.00001
+          AND UPPER(COALESCE(l.payload->>'source','LIVE'))='LIVE'
+      )
+  `);
+  console.log(`Historical LIVE/BACKFILL reconciliation: removed ${reconciled.rowCount} exact BACKFILL twins`);
   return true;
 }
 
