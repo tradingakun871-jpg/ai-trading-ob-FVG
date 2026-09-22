@@ -7,7 +7,7 @@ input string ApiBaseUrl="https://ai-trading-ob-fvg-mtf-production.up.railway.app
 input string BridgeToken="PASTE_BRIDGE_TOKEN_HERE";
 input string BridgeSymbol="XAUUSD";
 input int BackfillBars=2000;
-input int TimerSeconds=2;
+input int TimerSeconds=1;
 input int HttpTimeoutMs=10000;
 
 input bool EnableAutoExecution=false;
@@ -22,7 +22,8 @@ input int MaxDeviationPoints=30;
 // DXY persistent shadow feed. Does not block M1/M3 entries by itself.
 input bool EnableDxyFeed=true;
 input string DxySymbol="AUTO";          // AUTO, DXY, USDX, or broker-specific symbol
-input int DxyBackfillBars=240;          // >=21 recommended; 240 gives recovery context
+input int DxyBackfillBars=240;          // startup/recovery closed-candle context
+input int DxyRealtimeSeconds=1;          // send DXY bid/ask heartbeat every second
 input int DxyRefreshMinutes=1;          // periodic reseed after Railway/container restart
 input bool EnableLocalDxyHardGate=true;
 input int DxyCorrelationBars=60;
@@ -35,6 +36,7 @@ string g_dxySymbol="";
 datetime g_currentM1Open=0;
 datetime g_currentDxyM1Open=0;
 datetime g_lastDxyBackfillAttempt=0;
+datetime g_lastDxyRealtimeSent=0;
 
 string I64(long v){return IntegerToString(v);}
 string TrimSlash(string s){while(StringLen(s)>0 && StringSubstr(s,StringLen(s)-1,1)=="/")s=StringSubstr(s,0,StringLen(s)-1);return s;}
@@ -131,6 +133,16 @@ bool SendClosedM1()
    MqlRates r[];ArraySetAsSeries(r,true);if(CopyRates(g_symbol,PERIOD_M1,1,1,r)!=1)return false;
    string json="{\"symbol\":\""+EscapeJson(g_symbol)+"\",\"timeframe\":\"M1\",\"autoAggregate\":true,\"candle\":"+CandleJson(r[0])+"}";
    string resp;return HttpPost("/api/mt5/webhook",json,resp);
+}
+
+bool SendDxyRealtime()
+{
+   if(!EnableDxyFeed||g_dxySymbol=="")return false;
+   MqlTick t;if(!SymbolInfoTick(g_dxySymbol,t)||t.time<=0)return false;
+   string json="{\"symbol\":\""+EscapeJson(g_dxySymbol)+"\",\"bid\":"+NumFor(g_dxySymbol,t.bid)+",\"ask\":"+NumFor(g_dxySymbol,t.ask)+",\"tickOnly\":true,\"tickTime\":"+I64((long)t.time)+"}";
+   string resp;bool ok=HttpPost("/api/mt5/dxy-candle",json,resp);
+   if(ok)g_lastDxyRealtimeSent=TimeCurrent();
+   return ok;
 }
 
 bool SendClosedDxyM1()
@@ -370,6 +382,8 @@ void OnTimer()
       if(dxyOpen>0&&g_currentDxyM1Open>0&&dxyOpen!=g_currentDxyM1Open){SendClosedDxyM1();g_currentDxyM1Open=dxyOpen;}
       else if(g_currentDxyM1Open==0&&dxyOpen>0)g_currentDxyM1Open=dxyOpen;
 
+      int realtimeSec=(int)MathMax(1,DxyRealtimeSeconds);
+      if(g_lastDxyRealtimeSent==0||TimeCurrent()-g_lastDxyRealtimeSent>=realtimeSec)SendDxyRealtime();
       int refreshSec=(int)MathMax(60,DxyRefreshMinutes*60);
       if(g_lastDxyBackfillAttempt==0||TimeCurrent()-g_lastDxyBackfillAttempt>=refreshSec)SendDxyBackfill();
    }
