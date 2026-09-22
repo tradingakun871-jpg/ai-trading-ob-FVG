@@ -10,20 +10,8 @@ function writeIfChanged(file,next){
   if(current!==next)fs.writeFileSync(file,next);
 }
 
-// 1) Tag trades/setups created by candle ingestion. notify=false is replay/backfill;
-// notify=true is live closed-candle ingestion. Realtime tick-created trades remain LIVE by default.
-{
-  const file=path.join(__dirname,'server.js');
-  let s=fs.readFileSync(file,'utf8');
-  if(!s.includes("source=notify?'LIVE':'BACKFILL'")){
-    const old="function ingestEngine(tf,candle,notify=true){const e=engines[tf],bt=notify?tradeMap(e):null,bp=notify?pendingSet(e):null,bs=notify?setupMap(e):null,r=e.ingest(candle);if(notify)dispatchTransitions(tf,bt,bp,bs);return r}";
-    const neu="function ingestEngine(tf,candle,notify=true){const e=engines[tf],bt=notify?tradeMap(e):null,bp=notify?pendingSet(e):null,bs=notify?setupMap(e):null,beforeSetupIds=new Set(e.setups.map(x=>x.id)),beforeTradeIds=new Set(e.trades.map(x=>x.id)),r=e.ingest(candle),source=notify?'LIVE':'BACKFILL';for(const x of e.setups)if(!beforeSetupIds.has(x.id)&&!x.source)x.source=source;for(const x of e.trades)if(!beforeTradeIds.has(x.id)&&!x.source)x.source=source;if(notify)dispatchTransitions(tf,bt,bp,bs);return r}";
-    if(!s.includes(old))throw new Error('Historical source patch: ingestEngine marker not found');
-    s=s.replace(old,neu);
-    writeIfChanged(file,s);
-  }
-}
-
+// 1) Tag trades/setups created by candle ingestion. The source tag is now handled
+// directly by server/strategy code; keep boot compatible with newer ingest signatures.
 // 2) Expose source on /api/history. New rows use payload.source. Old rows are inferred from
 // DB insertion time vs trade opened time (>5 minutes means the row was reconstructed later).
 {
