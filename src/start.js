@@ -56,7 +56,7 @@ if(source.includes(oldTick))source=source.replace(oldTick,newTick);else if(!sour
 // After every backfill/restart, re-arm currently valid pending setups as LIMIT orders.
 const backfillNeedle="for(const c of cs)ingestOne(c.timeframe||tf,c,b.autoAggregate!==false,false);mt5.lastSeen=Date.now();await syncAllToDatabase();";
 const backfillReplacement="for(const c of cs)ingestOne(c.timeframe||tf,c,b.autoAggregate!==false,false);mt5.lastSeen=Date.now();syncAllPendingLimits();await syncAllToDatabase();";
-if(source.includes(backfillNeedle))source=source.replace(backfillNeedle,backfillReplacement);else if(!source.includes('syncAllPendingLimits();await syncAllToDatabase()'))throw new Error('Backfill LIMIT sync patch marker not found');
+if(source.includes(backfillNeedle))source=source.replace(backfillNeedle,backfillReplacement);else if(source.includes('backfillWarmupOnly:true'))console.log('Backfill warmup-only provenance mode active; skipping legacy LIMIT/database backfill patch');else if(!source.includes('syncAllPendingLimits();await syncAllToDatabase()'))throw new Error('Backfill LIMIT sync patch marker not found');
 
 const autoExecRoutes=`
 app.get('/api/mt5/dxy-recovery',(q,r)=>{if(!requireBridge(q,r))return;const x=dxyRecoveryStatus();r.json({ok:true,...x,needBackfill:!x.ready,recommendedBars:Math.max(60,x.requiredBars),message:x.ready?'DXY_READY':'SEND_DXY_M1_BACKFILL'});});
