@@ -173,6 +173,17 @@ export async function getHistoricalEntries({timeframe=null,limit=500}={}) {
   const {rows}=await pool.query(`SELECT * FROM (${DEDUPED_TRADES_SQL}) d WHERE ${where} ORDER BY opened_time DESC LIMIT $${params.length}`,params);
   return rows.map(historyRow);
 }
+export async function getHistoricalDebug(entries=[]) {
+  if (!pool) return null;
+  const vals=(Array.isArray(entries)?entries:[]).map(Number).filter(Number.isFinite);
+  if(!vals.length)return [];
+  const {rows}=await pool.query(`SELECT id,timeframe,direction,status,opened_time,closed_time,entry,sl,outcome,pnl_pips,
+    payload->>'source' AS source,payload->>'result' AS result,tp1_hit,tp2_hit,tp3_hit,tp4_hit,updated_at
+    FROM trading_setups WHERE opened_time IS NOT NULL AND id LIKE '%:trade:%'
+      AND entry = ANY($1::double precision[]) ORDER BY entry,opened_time,updated_at`,[vals]);
+  return rows;
+}
+
 export async function getWeeklyDecisionAnalysis(nowMs=Date.now()) {
   if (!pool) return null;
   const {weekStart}=jakartaPeriodStarts(nowMs);
