@@ -105,10 +105,27 @@ function jakartaPeriodStarts(nowMs=Date.now()) {
   const dayStart=Date.UTC(y,m,d)-JAKARTA_OFFSET_MS, dow=(shifted.getUTCDay()+6)%7;
   return {dayStart,weekStart:Date.UTC(y,m,d-dow)-JAKARTA_OFFSET_MS,monthStart:Date.UTC(y,m,1)-JAKARTA_OFFSET_MS};
 }
-const DEDUPED_TRADES_SQL=`SELECT DISTINCT ON (timeframe,direction,entry,sl,FLOOR(opened_time::numeric / CASE timeframe WHEN 'M3' THEN 180000 ELSE 60000 END)) *
-FROM trading_setups WHERE opened_time IS NOT NULL AND id LIKE '%:trade:%' AND timeframe IN ('M1','M3')
-ORDER BY timeframe,direction,entry,sl,FLOOR(opened_time::numeric / CASE timeframe WHEN 'M3' THEN 180000 ELSE 60000 END),
-CASE WHEN UPPER(COALESCE(payload->>'source','LIVE'))='LIVE' THEN 0 ELSE 1 END ASC,
+const DEDUPED_TRADES_SQL=`WITH ranked AS (
+  SELECT t.*,
+    CASE WHEN UPPER(COALESCE(t.payload->>'source','LIVE'))='LIVE' THEN 0 ELSE 1 END AS source_rank,
+    EXISTS (
+      SELECT 1 FROM trading_setups l
+      WHERE l.opened_time IS NOT NULL AND l.id LIKE '%:trade:%'
+        AND l.timeframe=t.timeframe AND l.direction=t.direction
+        AND ABS(COALESCE(l.entry,0)-COALESCE(t.entry,0)) < 0.00001
+        AND ABS(COALESCE(l.sl,0)-COALESCE(t.sl,0)) < 0.00001
+        AND UPPER(COALESCE(l.payload->>'source','LIVE'))='LIVE'
+    ) AS has_live_twin
+  FROM trading_setups t
+  WHERE t.opened_time IS NOT NULL AND t.id LIKE '%:trade:%' AND t.timeframe IN ('M1','M3')
+), eligible AS (
+  SELECT * FROM ranked
+  WHERE source_rank=0 OR NOT has_live_twin
+)
+SELECT DISTINCT ON (timeframe,direction,entry,sl) *
+FROM eligible
+ORDER BY timeframe,direction,entry,sl,
+source_rank ASC,
 CASE WHEN outcome IN ('WIN','LOSS') THEN 0 ELSE 1 END ASC,
 ((tp1_hit::int)+(tp2_hit::int)+(tp3_hit::int)+(tp4_hit::int)) DESC,updated_at DESC`;
 
