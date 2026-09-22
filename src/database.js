@@ -85,7 +85,7 @@ export async function syncEngineToDatabase(tf, engine) {
         WHEN (trading_setups.tp2_hit OR EXCLUDED.tp2_hit) THEN 2*ABS(COALESCE(EXCLUDED.sl_pips,trading_setups.sl_pips,0))
         WHEN (trading_setups.tp1_hit OR EXCLUDED.tp1_hit) THEN ABS(COALESCE(EXCLUDED.sl_pips,trading_setups.sl_pips,0))
         ELSE COALESCE(EXCLUDED.pnl_pips,trading_setups.pnl_pips) END,
-      skip_reason=EXCLUDED.skip_reason,payload=EXCLUDED.payload,quality_grade=EXCLUDED.quality_grade,quality_score=EXCLUDED.quality_score,market_regime=EXCLUDED.market_regime,regime_aligned=EXCLUDED.regime_aligned,updated_at=NOW()`,
+      skip_reason=EXCLUDED.skip_reason,payload=CASE WHEN trading_setups.outcome IN ('WIN','LOSS') THEN trading_setups.payload ELSE EXCLUDED.payload END,quality_grade=EXCLUDED.quality_grade,quality_score=EXCLUDED.quality_score,market_regime=EXCLUDED.market_regime,regime_aligned=EXCLUDED.regime_aligned,updated_at=NOW()`,
       [id,tf,symbol,x.dir,x.status,n(x.bornTime??x.time),n(x.openedTime),n(x.closedTime),entry,n(x.structuralSl),sl,riskPips,n(x.tps?.[0]),n(x.tps?.[1]),n(x.tps?.[2]),n(x.tps?.[3]),!!tpHits[0],!!tpHits[1],!!tpHits[2],!!tpHits[3],won?'WIN':closedLoss?'LOSS':null,pnlPips,x.skipReason||null,JSON.stringify(x),x.quality?.grade||null,n(x.quality?.score),x.quality?.regime||null,x.quality?.regimeAligned??null]);
   }
   return true;
@@ -108,7 +108,9 @@ function jakartaPeriodStarts(nowMs=Date.now()) {
 const DEDUPED_TRADES_SQL=`SELECT DISTINCT ON (timeframe,direction,entry,sl,FLOOR(opened_time::numeric / CASE timeframe WHEN 'M3' THEN 180000 ELSE 60000 END)) *
 FROM trading_setups WHERE opened_time IS NOT NULL AND id LIKE '%:trade:%' AND timeframe IN ('M1','M3')
 ORDER BY timeframe,direction,entry,sl,FLOOR(opened_time::numeric / CASE timeframe WHEN 'M3' THEN 180000 ELSE 60000 END),
-((tp1_hit::int)+(tp2_hit::int)+(tp3_hit::int)+(tp4_hit::int)) DESC,(outcome IS NOT NULL) DESC,updated_at DESC`;
+CASE WHEN UPPER(COALESCE(payload->>'source','LIVE'))='LIVE' THEN 0 ELSE 1 END ASC,
+CASE WHEN outcome IN ('WIN','LOSS') THEN 0 ELSE 1 END ASC,
+((tp1_hit::int)+(tp2_hit::int)+(tp3_hit::int)+(tp4_hit::int)) DESC,updated_at DESC`;
 
 export async function getPerformance() {
   if (!pool) return null;
