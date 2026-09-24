@@ -24,6 +24,7 @@ input bool EnableDxyFeed=true;
 input string DxySymbol="AUTO";          // AUTO, DXY, USDX, or broker-specific symbol
 input int DxyBackfillBars=240;          // >=21 recommended; 240 gives recovery context
 input int DxyRefreshMinutes=1;          // periodic reseed after Railway/container restart
+input int DxyTickSeconds=2;              // send live DXY bid/ask; keeps Railway DXY freshness valid
 
 CTrade trade;
 string g_symbol="";
@@ -127,6 +128,16 @@ bool SendClosedM1()
    MqlRates r[];ArraySetAsSeries(r,true);if(CopyRates(g_symbol,PERIOD_M1,1,1,r)!=1)return false;
    string json="{\"symbol\":\""+EscapeJson(g_symbol)+"\",\"timeframe\":\"M1\",\"autoAggregate\":true,\"candle\":"+CandleJson(r[0])+"}";
    string resp;return HttpPost("/api/mt5/webhook",json,resp);
+}
+
+bool SendDxyTick()
+{
+   if(!EnableDxyFeed||g_dxySymbol=="")return false;
+   MqlTick t;if(!SymbolInfoTick(g_dxySymbol,t)||t.bid<=0)return false;
+   string json="{\"symbol\":\""+EscapeJson(g_dxySymbol)+"\",\"bid\":"+NumFor(g_dxySymbol,t.bid)+",\"ask\":"+NumFor(g_dxySymbol,t.ask)+",\"tickOnly\":true,\"time\":"+I64((long)t.time)+"}";
+   string resp;bool ok=HttpPost("/api/mt5/dxy-candle",json,resp);
+   if(!ok)Print("[DXY V2.5] LIVE tick send failed symbol=",g_dxySymbol);
+   return ok;
 }
 
 bool SendClosedDxyM1()
@@ -343,6 +354,11 @@ void OnTimer()
       datetime dxyOpen=iTime(g_dxySymbol,PERIOD_M1,0);
       if(dxyOpen>0&&g_currentDxyM1Open>0&&dxyOpen!=g_currentDxyM1Open){SendClosedDxyM1();g_currentDxyM1Open=dxyOpen;}
       else if(g_currentDxyM1Open==0&&dxyOpen>0)g_currentDxyM1Open=dxyOpen;
+
+      // Live DXY must be pushed independently from the 1-minute candle/backfill.
+      // Railway uses lastSeen freshness for the execution gate; without this the
+      // server can receive valid DXY candles yet still report WAIT_DXY_LIVE.
+      SendDxyTick();
 
       int refreshSec=(int)MathMax(60,DxyRefreshMinutes*60);
       if(g_lastDxyBackfillAttempt==0||TimeCurrent()-g_lastDxyBackfillAttempt>=refreshSec)SendDxyBackfill();
